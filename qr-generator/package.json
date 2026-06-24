@@ -1,0 +1,16 @@
+{
+  "name": "school-bus-qr-generator",
+  "version": "1.0.0",
+  "description": "Generate QR cards for students",
+  "type": "module",
+  "scripts": {
+    "generate": "node generate.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "googleapis": "^144.0.0",
+    "puppeteer": "^25.2.0",
+    "qrcode": "^1.5.4",
+    "school-bus-system": "file:.."
+  }
+}

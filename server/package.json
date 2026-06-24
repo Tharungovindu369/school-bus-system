@@ -1,0 +1,24 @@
+{
+  "name": "school-bus-server",
+  "version": "1.0.0",
+  "description": "School Bus Management System API",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "setup-sheets": "node setup-sheets.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.5.2",
+    "googleapis": "^144.0.0",
+    "qrcode": "^1.5.4",
+    "school-bus-system": "file:..",
+    "xlsx": "^0.18.5"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "school-bus-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "School Bus Management System for Prathibha Junior College",
+  "scripts": {
+    "install:all": "npm install --prefix server && npm install --prefix client && npm install --prefix qr-generator",
+    "server": "npm start --prefix server",
+    "client": "npm run dev --prefix client",
+    "generate-qr": "node qr-generator/generate.js",
+    "setup-sheets": "npm run setup-sheets --prefix server",
+    "build": "npm run build --prefix client",
+    "test": "node --experimental-fetch tests/run-all.mjs",
+    "reset-all": "node tests/reset-all.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.0",
+    "dotenv": "^17.4.2"
+  }
+}

@@ -1,0 +1,231 @@
+Created At: 2026-06-21T12:25:12Z
+Completed At: 2026-06-21T12:25:19Z
+The following changes were made by the replace_file_content tool to: D:\school-bus-system\server\index.js. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+[diff_block_start]
+@@ -983,17 +983,208 @@
+ 
+     res.json({ student, history });
+   } catch (error) {
+-    console.error('Error fetching student details:', error);
+-    res.status(500).json({ error: 'Failed to fetch student details' });
+-  }
+-});
+-
+-app.listen(config.port, () => {
+-  console.log(`School Bus API running on http://localhost:${config.port}`);
+-});
+-
+-
+-
+-
+-
++        incident_type: 'fee_defaulter',
++        details: 'Student boarded with fee status DUE',
++        timestamp: nowTimestamp(),
++      });
++    }
++
++    await sheets.updateNotificationStatus(student_id, today, scanType, notificationStatus);
++
++    res.json({
++      success: true,
++      scan_type: scanType,
++      student,
++      record,
++      notification: notifyResult,
++      feeAlert: ['boarding', 'return_boarding'].includes(scanType) && isDue,
++      feeAlertMessage: ['boarding', 'return_boarding'].includes(scanType) && isDue ? FEE_ALERT_MESSAGE : null,
++      isCrossBus,
++      crossBusNote: isCrossBus
++        ? `ℹ️ Note: ${student.name}'s regular bus is ${assignedBus}, boarding ${formattedBus} today`
++        : null,
++    });
++  } catch (err) {
++    res.status(500).json({ error: err.message });
++  }
++});
++
++app.post('/api/reception/scan', async (req, res) => {
++  try {
++    const { student_id } = req.body;
++    const student = await sheets.getStudentById(student_id);
++    if (!student) return res.status(404).json({ error: 'Student not found' });
++
++    const today = getISTDateString();
++    const formattedBus = formatBusNumber(student.bus_number);
++    const arrivalTime = formatISTTime();
++    const bus = await sheets.getBusByNumber(formattedBus);
++    const driverName = bus?.driver_name || 'Unknown';
++
++    const existingArrival = await sheets.findAttendanceRecord(
++      student_id,
++      formattedBus,
++      today,
++      'college_arrival'
++    );
++
++    if (existingArrival) {
++      await sheets.appendIncident({
++        date: today,
++        student_id: student.student_id,
++        student_name: student.name,
++        bus_number: formattedBus,
++        driver_name: driverName,
++        incident_type: 'duplicate_scan',
++        details: 'Duplicate college_arrival scan at reception',
++        timestamp: nowTimestamp(),
++      });
++      return res.json({
++        success: true,
++        duplicate: true,
++        student,
++        message: `⚠️ ${student.name} has already been scanned at college today`,
++      });
++    }
++
++    const driverScan = await sheets.hasDriverScanToday(student_id, today);
++    const missedScan = !driverScan;
++
++    let notificationStatus = 'college_arrival';
++    if (missedScan) notificationStatus += '; missed_driver_scan';
++
++    const boardingBus = driverScan
++      ? formatBusNumber(driverScan.actual_bus || driverScan.bus_number)
++      : formattedBus;
++    const isCrossBus =
++      !!driverScan &&
++      String(driverScan.is_cross_bus).toUpperCase() === 'TRUE';
++
++    const record = {
++      timestamp: nowTimestamp(),
++      student_id: student.student_id,
++      student_name: student.name,
++      bus_number: formattedBus,
++      stop_name: student.stop_name,
++      boarded_at: driverScan?.boarded_at || '',
++      driver_name: driverScan?.driver_name || driverName,
++      date: today,
++      notification_status: notificationStatus,
++      scan_type: 'college_arrival',
++      dropoff_time: '',
++      scanned_by: 'reception',
++      arrival_time: arrivalTime,
++    };
++
++    await sheets.appendAttendance(record);
++
++    await sendCollegeArrivalNotification({
++      parentWhatsapp: student.parent_whatsapp,
++      studentName: student.name,
++      busNumber: boardingBus,
++      withBus: !missedScan,
++    });
++
++    if (missedScan) {
++      await sheets.appendIncident({
++        date: today,
++        student_id: student.student_id,
++        student_name: student.name,
++        bus_number: formattedBus,
++        driver_name: driverName,
++        incident_type: 'missed_driver_scan',
++        details: 'Student arrived at college without driver boarding scan',
++        timestamp: nowTimestamp(),
++      });
++      await sendAdminMissedScanAlert({
++        studentName: student.name,
++        busNumber: formattedBus,
++        driverName,
++      });
++    }
++
++    res.json({
++      success: true,
++      scan_type: 'college_arrival',
++      student,
++      missedScan,
++      driverScanned: !!driverScan,
++      isCrossBus,
++      boardingBus,
++      message: missedScan
++        ? `⚠️ WARNING: ${student.name} arrived at college BUT was NOT scanned by driver of ${formattedBus} today. Please check with the driver immediately.`
++        : isCrossBus
++          ? `✅ ${student.name} arrived at college (boarded ${boardingBus} today, usual bus ${formattedBus})`
++          : `✅ ${student.name} arrived at college via ${boardingBus}`,
++    });
++  } catch (err) {
++    res.status(500).json({ error: err.message });
++  }
++});
++
++app.post('/api/admin/login', loginLimiter, async (req, res) => {
++  const { password } = req.body;
++  if (await verifyCredential(password, await getAdminPassword())) {
++    return res.json({ success: true });
++  }
++  res.status(401).json({ error: 'Invalid Admin Password' });
++});
++
++app.get('/api/admin/credentials', async (req, res) => {
++  const { password } = req.query;
++  if (!(await verifyCredential(password, await getAdminPassword()))) return res.status(401).json({ error: 'Unauthorized' });
++  
++  res.json((await getAllCredentials()));
++});
++
++app.post('/api/admin/credentials', async (req, res) => {
++  const { password, type, key, value } = req.body;
++  if (!(await verifyCredential(password, await getAdminPassword()))) return res.status(401).json({ error: 'Unauthorized' });
++  
++  try {
++    if (type === 'driverPin' && (!value || !/^\d{4}$/.test(value))) {
++      return res.status(400).json({ error: 'Driver PIN must be exactly 4 digits' });
++    }
++    if (type === 'receptionPin' && (!value || !/^\d{4}$/.test(value))) {
++      return res.status(400).json({ error: 'Reception PIN must be exactly 4 digits' });
++    }
++    if (type === 'adminPassword' && (!value || value.length < 6)) {
++      return res.status(400).json({ error: 'Admin password must be at least 6 characters' });
++    }
++
++    await updateCredential(type, key, value);
++    res.json({ success: true });
++  } catch (e) {
++    res.status(400).json({ error: e.message });
++  }
++});
++
++app.get('/api/admin/student/:id', async (req, res) => {
++  const { password } = req.query;
++  if (!(await verifyCredential(password, await getAdminPassword()))) return res.status(401).json({ error: 'Unauthorized' });
++
++  try {
++    const studentId = req.params.id;
++    const student = await sheets.getStudentById(studentId);
++    if (!student) return res.status(404).json({ error: 'Student not found' });
++
++    student.calculated_fee_status = isFeeDue(student, getISTDateString()) ? 'DUE' : 'PAID';
++
++    const allRecords = await sheets.getAttendance(); // Fetches all attendance history
++    const history = allRecords
++      .filter(r => r.student_id === studentId)
++      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
++      .slice(0, 5);
++
++    res.json({ student, history });
++  } catch (error) {
++    console.error('Error fetching student details:', error);
++    res.status(500).json({ error: 'Failed to fetch student details' });
++  }
++});
++
++app.listen(config.port, async () => {
++  console.log(`School Bus API running on http://localhost:${config.port}`);
++  await migrateCredentials();
++});
+ 
+[diff_block_end]
+
+Please note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.
+
+We did our best to apply changes despite some inaccuracies. Double check if the edit applied is what you intended.

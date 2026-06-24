@@ -1,0 +1,347 @@
+Created At: 2026-06-21T18:52:02Z
+Completed At: 2026-06-21T18:52:04Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13219
+Showing lines 300 to 320
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+300:     buses: buses.length,
+301:     feeDefaultersBoarded,
+302:     activeReassignments: [],
+303:     incidents: todayIncidents,
+304:     allIncidents: [],
+305:     driverPerformance: [],
+306:     notDroppedOff: [],
+307:   };
+308: }
+309: 
+310: export async function updateNotificationStatus(studentId, date, status) {
+311:   const rows = await getSheetData('Attendance!A:I');
+312:   const records = rowsToObjects(rows);
+313:   const rowIndex = records.findIndex(
+314:     (r) => r.student_id === studentId && r.date === date
+315:   );
+316:   if (rowIndex === -1) return;
+317: 
+318:   const sheets = await getSheets();
+319:   const sheetRow = rowIndex + 2;
+320:   await sheets.spreadsheets.values.update({
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-06-21T18:52:08Z
+Completed At: 2026-06-21T18:52:10Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13219
+Showing lines 320 to 350
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+320:   await sheets.spreadsheets.values.update({
+321:     spreadsheetId: config.googleSheetsId,
+322:     range: `Attendance!I${sheetRow}`,
+323:     valueInputOption: 'USER_ENTERED',
+324:     requestBody: { values: [[status]] },
+325:   });
+326: }
+327: 
+328: export function clearCache(key) {}
+329: 
+330: export async function appendAuditLog(actionType, target, newValue, reason = '') {
+331:   try {
+332:     const sheets = await getSheets();
+333:     const values = [[
+334:       new Date().toISOString(),
+335:       actionType,
+336:       target,
+337:       newValue,
+338:       reason
+339:     ]];
+340:     await sheets.spreadsheets.values.append({
+341:       spreadsheetId: config.googleSheetsId,
+342:       range: 'AuditLog!A:E',
+343:       valueInputOption: 'USER_ENTERED',
+344:       insertDataOption: 'INSERT_ROWS',
+345:       requestBody: { values },
+346:     });
+347:   } catch (err) {
+348:     console.error('Audit Log Error:', err.message);
+349:   }
+350: }
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-06-22T18:30:00Z
+Completed At: 2026-06-22T18:30:01Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13343
+Showing lines 50 to 100
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+50:   const [headers, ...dataRows] = rows;
+51:   return dataRows
+52:     .filter((row) => row.some((cell) => cell !== undefined && cell !== ''))
+53:     .map((row) => {
+54:       const obj = {};
+55:       headers.forEach((header, i) => {
+56:         obj[header.trim()] = row[i] ?? '';
+57:       });
+58:       return obj;
+59:     });
+60: }
+61: 
+62: export async function getStudents() {
+63:   const rows = await getSheetData('Students!A:I');
+64:   return rowsToObjects(rows);
+65: }
+66: 
+67: export async function getStudentById(studentId) {
+68:   const students = await getStudents();
+69:   return students.find((s) => s.student_id === studentId);
+70: }
+71: 
+72: export async function getStudentsByBus(busNumber) {
+73:   const students = await getStudents();
+74:   return students.filter((s) => busNumberKey(s.default_bus) === busNumberKey(busNumber) || busNumberKey(s.assigned_bus) === busNumberKey(busNumber) || busNumberKey(s.bus_number) === busNumberKey(busNumber));
+75: }
+76: 
+77: export async function getBuses() {
+78:   const rows = await getSheetData('Buses!A:N');
+79:   return rowsToObjects(rows);
+80: }
+81: 
+82: export async function updateBusMorningStart(busNumber, time) {
+83:   const buses = await getBuses();
+84:   const rowIndex = buses.findIndex((b) => busNumberKey(b.bus_number) === busNumberKey(busNumber));
+85:   if (rowIndex === -1) throw new Error('Bus not found');
+86:   const sheets = await getSheets();
+87:   const sheetRow = rowIndex + 2;
+88:   await sheets.spreadsheets.values.update({
+89:     spreadsheetId: config.googleSheetsId,
+90:     range: `Buses!I${sheetRow}:L${sheetRow}`,
+91:     valueInputOption: 'USER_ENTERED',
+92:     requestBody: { values: [[time, '', 'morning', 'morning_running']] },
+93:   });
+94:   await appendAuditLog('bus_started_morning', busNumber, time);
+95: }
+96: 
+97: export async function updateBusReturnStart(busNumber, time) {
+98:   const buses = await getBuses();
+99:   const rowIndex = buses.findIndex((b) => busNumberKey(b.bus_number) === busNumberKey(busNumber));
+100:   if (rowIndex === -1) throw new Error('Bus not found');
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-06-22T18:31:46Z
+Completed At: 2026-06-22T18:31:48Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13343
+Showing lines 180 to 210
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+180:   const today = new Date().toISOString().split('T')[0];
+181:   return getAttendance(today);
+182: }
+183: 
+184: export async function appendAttendance(record) {
+185:   const sheets = await getSheets();
+186:   const values = [[
+187:     record.timestamp,
+188:     record.student_id,
+189:     record.student_name,
+190:     record.bus_number,
+191:     record.stop_name,
+192:     record.boarded_at,
+193:     record.driver_name,
+194:     record.date,
+195:     record.notification_status || '',
+196:   ]];
+197: 
+198:   await sheets.spreadsheets.values.append({
+199:     spreadsheetId: config.googleSheetsId,
+200:     range: 'Attendance!A:I',
+201:     valueInputOption: 'USER_ENTERED',
+202:     insertDataOption: 'INSERT_ROWS',
+203:     requestBody: { values },
+204:   });
+205: }
+206: 
+207: export async function updateStudentFeeStatus(studentId, feeStatus) {
+208:   const students = await getStudents();
+209:   const rowIndex = students.findIndex((s) => s.student_id === studentId);
+210:   if (rowIndex === -1) throw new Error('Student not found');
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-06-22T18:32:49Z
+Completed At: 2026-06-22T18:32:54Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13343
+Showing lines 150 to 180
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+150: }
+151: 
+152: export async function updateBusDriverDetails(busNumber, name, phone) {
+153:   const buses = await getBuses();
+154:   const rowIndex = buses.findIndex((b) => busNumberKey(b.bus_number) === busNumberKey(busNumber));
+155:   if (rowIndex === -1) throw new Error('Bus not found');
+156:   
+157:   const sheets = await getSheets();
+158:   const sheetRow = rowIndex + 2;
+159:   await sheets.spreadsheets.values.update({
+160:     spreadsheetId: config.googleSheetsId,
+161:     range: `Buses!B${sheetRow}:C${sheetRow}`,
+162:     valueInputOption: 'USER_ENTERED',
+163:     requestBody: { values: [[name, phone]] },
+164:   });
+165: }
+166: 
+167: export async function getBusByNumber(busNumber) {
+168:   const buses = await getBuses();
+169:   return buses.find((b) => busNumberKey(b.bus_number) === busNumberKey(busNumber));
+170: }
+171: 
+172: export async function getAttendance(dateFilter = null) {
+173:   const rows = await getSheetData('Attendance!A:H');
+174:   const records = rowsToObjects(rows);
+175:   if (!dateFilter) return records;
+176:   return records.filter((r) => r.date === dateFilter);
+177: }
+178: 
+179: export async function getTodayAttendance() {
+180:   const today = new Date().toISOString().split('T')[0];
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-06-22T18:33:22Z
+Completed At: 2026-06-22T18:33:23Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13343
+Showing lines 180 to 210
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+180:   const today = new Date().toISOString().split('T')[0];
+181:   return getAttendance(today);
+182: }
+183: 
+184: export async function appendAttendance(record) {
+185:   const sheets = await getSheets();
+186:   const values = [[
+187:     record.timestamp,
+188:     record.student_id,
+189:     record.student_name,
+190:     record.bus_number,
+191:     record.stop_name,
+192:     record.boarded_at,
+193:     record.driver_name,
+194:     record.date,
+195:     record.notification_status || '',
+196:   ]];
+197: 
+198:   await sheets.spreadsheets.values.append({
+199:     spreadsheetId: config.googleSheetsId,
+200:     range: 'Attendance!A:I',
+201:     valueInputOption: 'USER_ENTERED',
+202:     insertDataOption: 'INSERT_ROWS',
+203:     requestBody: { values },
+204:   });
+205: }
+206: 
+207: export async function updateStudentFeeStatus(studentId, feeStatus) {
+208:   const students = await getStudents();
+209:   const rowIndex = students.findIndex((s) => s.student_id === studentId);
+210:   if (rowIndex === -1) throw new Error('Student not found');
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+Created At: 2026-06-22T18:34:09Z
+Completed At: 2026-06-22T18:34:11Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13343
+Showing lines 260 to 290
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+260:   const feeDefaulters = students.filter(
+261:     (s) => (s.fee_status || '').toUpperCase() === 'DUE'
+262:   ).length;
+263: 
+264:   const activeBuses = buses.filter((b) => {
+265:     if (!b.last_updated) return false;
+266:     const updated = new Date(b.last_updated);
+267:     const hourAgo = Date.now() - 60 * 60 * 1000;
+268:     return updated.getTime() > hourAgo;
+269:   }).length;
+270: 
+271:   const feeDefaultersBoarded = todayAttendance
+272:     .filter((r) => ['boarding', 'return_boarding'].includes(r.scan_type))
+273:     .filter((r) => {
+274:       const student = students.find((s) => s.student_id === r.student_id);
+275:       return student && (student.fee_status || '').toUpperCase() === 'DUE';
+276:     })
+277:     .map((r) => {
+278:       const student = students.find((s) => s.student_id === r.student_id);
+279:       return {
+280:         student_id: r.student_id,
+281:         student_name: r.student_name,
+282:         actual_bus: r.actual_bus || r.bus_number,
+283:         boarded_at: r.boarded_at,
+284:         parent_whatsapp: student?.parent_whatsapp || 'N/A'
+285:       };
+286:     });
+287: 
+288:   return {
+289:     totalStudents: students.length,
+290:     boardedToday: todayAttendance.filter(r => r.scan_type === 'boarding').length,
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+undefined
+Created At: 2026-06-22T19:00:26Z
+Completed At: 2026-06-22T19:00:27Z
+
+				The command completed successfully.
+				Output:
+				Created At: 2026-06-21T18:52:02Z
+Completed At: 2026-06-21T18:52:04Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13219
+Showing lines 300 to 320
+The following code has been modified to include a line number before every line, in the format: <line_n
+Created At: 2026-06-21T18:52:08Z
+Completed At: 2026-06-21T18:52:10Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13219
+Showing lines 320 to 350
+The following code has been modified to include a line number before every line, in the format: <line_n
+Created At: 2026-06-22T18:30:00Z
+Completed At: 2026-06-22T18:30:01Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13343
+Showing lines 50 to 100
+The following code has been modified to include a line number before every line, in the format: <line_nu
+Created At: 2026-06-22T18:31:46Z
+Completed At: 2026-06-22T18:31:48Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13343
+Showing lines 180 to 210
+The following code has been modified to include a line number before every line, in the format: <line_n
+Created At: 2026-06-22T18:32:49Z
+Completed At: 2026-06-22T18:32:54Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13343
+Showing lines 150 to 180
+The following code has been modified to include a line number before every line, in the format: <line_n
+Created At: 2026-06-22T18:33:22Z
+Completed At: 2026-06-22T18:33:23Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13343
+Showing lines 180 to 210
+The following code has been modified to include a line number before every line, in the format: <line_n
+Created At: 2026-06-22T18:34:09Z
+Completed At: 2026-06-22T18:34:11Z
+File Path: `file:///D:/school-bus-system/server/services/sheets.js`
+Total Lines: 415
+Total Bytes: 13343
+Showing lines 260 to 290
+The following code has been modified to include a line number before every line, in the format: <line_n
+
+
