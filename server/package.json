@@ -15,10 +15,11 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "express-rate-limit": "^8.5.2",
+    "express-rate-limit": "^8.6.0",
+    "firebase-admin": "^14.1.0",
     "googleapis": "^144.0.0",
+    "helmet": "^8.3.0",
     "qrcode": "^1.5.4",
-    "school-bus-system": "file:..",
-    "xlsx": "^0.18.5"
+    "school-bus-system": "file:.."
   }
 }

@@ -11,6 +11,47 @@ import { sendWhatsAppNotification } from './services/whatsapp.js';
 import { getAllCredentials, updateCredential, getAdminPassword, getAccountantPin, getBusInchargePin } from './services/credentials.js';
 import * as reassignments from './services/reassignments.js';
 
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const admin = require('firebase-admin');
+const { getMessaging } = require('firebase-admin/messaging');
+
+let fcmEnabled = false;
+try {
+  const serviceAccount = require('./serviceAccountKey.json');
+  admin.initializeApp({
+    credential: admin.cert(serviceAccount)
+  });
+  fcmEnabled = true;
+  console.log('✅ Firebase Admin SDK initialized successfully');
+} catch (err) {
+  console.error('⚠️ Firebase Admin SDK initialization failed:', err.message);
+}
+
+export async function sendPushNotification(fcmToken, title, body) {
+  if (!fcmEnabled || !fcmToken) return;
+  try {
+    const messaging = getMessaging();
+    await messaging.send({
+      token: fcmToken,
+      notification: { title, body },
+      webpush: {
+        headers: {
+          Urgency: 'high'
+        },
+        notification: {
+          body,
+          icon: '/logo.png',
+          click_action: '/'
+        }
+      }
+    });
+    console.log(`Push notification sent successfully to token: ${fcmToken.slice(0, 10)}...`);
+  } catch (err) {
+    console.error('Failed to send push notification:', err.message);
+  }
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const server = http.createServer(app);
@@ -19,10 +60,41 @@ const server = http.createServer(app);
 server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
 
-app.use(cors());
-app.use(express.json());
+import helmet from 'helmet';
+
+// Enable Helmet for security headers
+app.use(helmet({ contentSecurityPolicy: false }));
+
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:3002'];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS policy violation'));
+    }
+  },
+  credentials: true
+}));
+
+app.use(express.json({ limit: '10mb' }));
 
 // RATE LIMITERS
+const lookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30, // 30 requests per 15 minutes per IP to prevent student record enumeration
+  message: { error: 'Too many lookup requests from this IP. Please try again after 15 minutes.' }
+});
+
+const scanLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 60,
+  message: { error: 'Too many scan requests, please slow down.' }
+});
+
 const adminLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, message: { error: 'Too many admin login attempts, please try again after 2 minutes' } });
 const accountantLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, message: { error: 'Too many accountant login attempts, please try again after 2 minutes' } });
 const busInchargeLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, message: { error: 'Too many bus-incharge login attempts, please try again after 2 minutes' } });
@@ -188,6 +260,17 @@ async function authAnyStaff(req, res, next) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+async function authAdminOrAccountant(req, res, next) {
+  try {
+    const adminPwd = await getAdminPassword();
+    const accPin = await getAccountantPin();
+    const token = req.headers['x-admin-password'] || req.headers['x-accountant-pin'] || req.query.token;
+    if (adminPwd && token === adminPwd) return next();
+    if (accPin && token === accPin) return next();
+    res.status(403).json({ error: 'Forbidden: Admin or Accountant access required' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
 async function authDriver(req, res, next) {
     const { busNumber, pin } = req.headers;
     const pins = getDriverPins();
@@ -218,8 +301,12 @@ app.get('/api/config/scan-mode', async (req, res) => {
 app.post('/api/driver/login', driverLoginLimiter, (req, res) => {
   const { pin, busNumber } = req.body;
   const pins = getDriverPins();
-  const bus = String(busNumber);
-  if (pins[bus] && pins[bus] === String(pin)) return res.json({ success: true, busNumber: bus });
+  const inputKey = String(busNumber).replace(/^bus\s*/i, '').trim();
+  const matchedKey = Object.keys(pins).find(k => String(k).replace(/^bus\s*/i, '').trim() === inputKey);
+  
+  if (matchedKey && pins[matchedKey] === String(pin)) {
+    return res.json({ success: true, busNumber: matchedKey });
+  }
   res.status(401).json({ success: false, message: 'Invalid PIN for this bus' });
 });
 
@@ -302,7 +389,16 @@ app.get('/api/bus/:number', async (req, res) => {
     if (!bus) return res.status(404).json({ error: 'Bus not found' });
     const todayAttendance = await sheets.getTodayAttendance();
     const boarded = todayAttendance.filter(a => String(a.bus_number) === String(req.params.number));
-    res.json({ ...bus, boardedToday: boarded });
+    
+    // Fetch active journey log for this bus
+    const rows = await sheets.getSheetData('Journey_Logs!A:I').catch(() => null);
+    let activeJourney = null;
+    if (rows && rows.length > 1) {
+      const logs = sheets.rowsToObjects(rows);
+      activeJourney = [...logs].reverse().find(log => String(log.bus_number) === String(req.params.number) && (!log.end_time || String(log.end_time).trim() === ''));
+    }
+    
+    res.json({ ...bus, boardedToday: boarded, activeJourney });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -312,56 +408,197 @@ app.post('/api/bus/location', async (req, res) => {
     const { bus_number, lat, lng } = req.body;
     if (!bus_number || lat == null || lng == null) return res.status(400).json({ error: 'bus_number, lat, lng required' });
     await sheets.updateBusLocation(bus_number, lat, lng);
+    sheets.checkGeofenceNextStop(bus_number, lat, lng).catch(console.error);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/bus/start', async (req, res) => {
+app.post('/api/bus/odometer-upload', async (req, res) => {
+  try {
+    const { bus_number, image, driver_name, reason, odometer_reading, refueled, liters } = req.body;
+    if (!bus_number || !image) {
+      return res.status(400).json({ error: 'Missing bus_number or image' });
+    }
+    const result = await sheets.processOdometerUpload(
+      bus_number,
+      image,
+      driver_name,
+      reason,
+      odometer_reading,
+      refueled,
+      liters
+    );
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('Odometer upload failed:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/bus/:busNumber/odometer-stats', async (req, res) => {
+  try {
+    const stats = await sheets.getOdometerStats(req.params.busNumber);
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/odometer-stats', authBusIncharge, async (req, res) => {
+  try {
+    const stats = await sheets.getOdometerStats();
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/bus/odometer-ocr', async (req, res) => {
+  try {
+    const { image } = req.body;
+    if (!image) return res.status(400).json({ error: 'Missing image' });
+    const extractedReading = await sheets.runOcrOnImage(image);
+    res.json({ success: true, extractedReading });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/bus', authBusIncharge, async (req, res) => {
   try {
     const { bus_number } = req.body;
+    if (!bus_number) return res.status(400).json({ error: 'bus_number is required' });
+    await sheets.addBus(req.body);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/stops', authBusIncharge, async (req, res) => {
+  try {
+    const stops = await sheets.getRouteStops();
+    res.json(stops);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/stops', authBusIncharge, async (req, res) => {
+  try {
+    const stop = req.body;
+    if (!stop.bus_number || !stop.stop_name || stop.latitude == null || stop.longitude == null || stop.sequence == null) {
+      return res.status(400).json({ error: 'Missing required stop fields' });
+    }
+    await sheets.addRouteStop(stop);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/stops/:id', authBusIncharge, async (req, res) => {
+  try {
+    await sheets.deleteRouteStop(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/bus/start', async (req, res) => {
+  try {
+    const { bus_number, fuel_reading, reason } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
+    const fuelVal = (fuel_reading == null || String(fuel_reading).trim() === '') ? 'N/A' : fuel_reading;
+    const reasonVal = reason || '1. Pick up';
+
     const startTime = nowTimestamp();
     await sheets.updateBusMorningStart(bus_number, startTime);
+    await sheets.startJourneyLog(bus_number, req.body.driver_name, fuelVal, reasonVal);
     res.json({ success: true, bus_number, startTime, notificationsSent: 0 });
+
+    // Asynchronously send push notifications to all parents of students on this bus
+    sheets.getStudents().then(students => {
+      const busStudents = students.filter(s => String(s.bus_number).trim() === String(bus_number).trim());
+      busStudents.forEach(s => {
+        if (s.fcm_token) {
+          sendPushNotification(
+            s.fcm_token,
+            `Bus ${bus_number} Morning Trip Started`,
+            `Bus ${bus_number} has started its morning journey. You can now track its live location.`
+          ).catch(e => console.error(`Error sending start push to ${s.student_id}:`, e.message));
+        }
+      });
+    }).catch(console.error);
+
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/bus/start-return', async (req, res) => {
   try {
-    const { bus_number } = req.body;
+    const { bus_number, fuel_reading, reason } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
+    const fuelVal = (fuel_reading == null || String(fuel_reading).trim() === '') ? 'N/A' : fuel_reading;
+    const reasonVal = reason || '2. Drop';
+
     const startTime = nowTimestamp();
     await sheets.updateBusReturnStart(bus_number, startTime);
+    await sheets.startJourneyLog(bus_number, req.body.driver_name, fuelVal, reasonVal);
     res.json({ success: true, bus_number, startTime, notificationsSent: 0 });
+
+    // Asynchronously send push notifications to all parents of students on this bus
+    sheets.getStudents().then(students => {
+      const busStudents = students.filter(s => String(s.bus_number).trim() === String(bus_number).trim());
+      busStudents.forEach(s => {
+        if (s.fcm_token) {
+          sendPushNotification(
+            s.fcm_token,
+            `Bus ${bus_number} Return Trip Started`,
+            `Bus ${bus_number} has started its return journey. You can now track its live location.`
+          ).catch(e => console.error(`Error sending start return push to ${s.student_id}:`, e.message));
+        }
+      });
+    }).catch(console.error);
+
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/bus/stop', async (req, res) => {
   try {
-    const { bus_number } = req.body;
+    const { bus_number, fuel_reading } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
+    const fuelVal = (fuel_reading == null || String(fuel_reading).trim() === '') ? 'N/A' : fuel_reading;
+
     const endTime = nowTimestamp();
     await sheets.updateBusMorningStop(bus_number, endTime);
+    await sheets.stopJourneyLog(bus_number, fuelVal);
     res.json({ success: true, bus_number, endTime, current_status: 'idle', notificationsSent: 0 });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/bus/stop-return', async (req, res) => {
   try {
-    const { bus_number } = req.body;
+    const { bus_number, fuel_reading } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
+    const fuelVal = (fuel_reading == null || String(fuel_reading).trim() === '') ? 'N/A' : fuel_reading;
+
     const endTime = nowTimestamp();
     await sheets.updateBusReturnStop(bus_number, endTime);
+    await sheets.stopJourneyLog(bus_number, fuelVal);
     res.json({ success: true, bus_number, endTime, current_status: 'idle', notificationsSent: 0 });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // SCANNING
-app.post('/api/scan', async (req, res) => {
+app.post('/api/scan', scanLimiter, async (req, res) => {
   try {
     const { student_id, driver_name, bus_number, stop_name } = req.body;
     const student = await sheets.getStudentById(student_id.trim().toUpperCase());
     if (!student) return res.status(404).json({ error: 'Student not found' });
+    if (student.status === 'INACTIVE') {
+      return res.status(400).json({ error: 'Student is inactive (dropped out)' });
+    }
 
     const today = todayStr();
     
@@ -414,12 +651,30 @@ app.post('/api/scan', async (req, res) => {
     attendanceQueue.push(record);
     saveQueueBackup();
 
+    if (record.stop_name) {
+      sheets.updateBusNextStop(record.bus_number, record.stop_name).catch(console.error);
+    }
+
     let scan_type = 'boarding';
     if (bus && bus.current_status === 'return_running') {
       scan_type = 'dropoff';
     }
 
     res.json({ success: true, student, record, isCrossBus, scan_type, feeAlert });
+
+    // Async Push Notification
+    if (student.fcm_token) {
+      const msgTitle = `Bus Tracker Update - ${student.name}`;
+      const msgBody = scan_type === 'boarding' 
+        ? `🚌 ${student.name} boarded at ${record.stop_name}` 
+        : `🚌 ${student.name} exited at ${record.stop_name}`;
+      console.log(`[Push Trigger] Student ${student.student_id} has FCM token. Sending push notification...`);
+      sendPushNotification(student.fcm_token, msgTitle, msgBody)
+        .then(() => console.log(`[Push Trigger] Push notification sent successfully for student ${student.student_id}`))
+        .catch(e => console.error(`[Push Trigger] Push notification delivery failed for student ${student.student_id}:`, e.message));
+    } else {
+      console.log(`[Push Trigger] Student ${student.student_id} has no registered FCM token. Skipping push.`);
+    }
 
     
     // Async Whatsapp
@@ -442,12 +697,15 @@ app.post('/api/scan', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/reception/scan', async (req, res) => {
+app.post('/api/reception/scan', scanLimiter, async (req, res) => {
   try {
     const { student_id } = req.body;
     if (!student_id) return res.status(400).json({ error: 'Student ID required' });
     const student = await sheets.getStudentById(student_id.trim().toUpperCase());
     if (!student) return res.status(404).json({ error: 'Student not found' });
+    if (student.status === 'INACTIVE') {
+      return res.status(400).json({ error: 'Student is inactive (dropped out)' });
+    }
 
     const attendance = await sheets.getTodayAttendance();
     
@@ -498,12 +756,28 @@ app.post('/api/reception/scan', async (req, res) => {
     attendanceQueue.push(record);
     saveQueueBackup();
 
+    if (student.bus_number) {
+      sheets.updateBusNextStop(student.bus_number, 'School Gate').catch(console.error);
+    }
+
     const isMissedScan = !driverScanned;
     const message = isMissedScan 
       ? "Student reached gate without being scanned by bus driver"
       : "Student successfully verified at gate";
 
     res.json({ success: true, student, missedScan: isMissedScan, message, isDue });
+
+    // Async Push Notification (Gate scan)
+    if (student.fcm_token) {
+      const msgTitle = `Bus Tracker Update - ${student.name}`;
+      const msgBody = `🏢 ${student.name} checked in at School Gate`;
+      console.log(`[Push Trigger - Gate] Student ${student.student_id} has FCM token. Sending push notification...`);
+      sendPushNotification(student.fcm_token, msgTitle, msgBody)
+        .then(() => console.log(`[Push Trigger - Gate] Push notification sent successfully for student ${student.student_id}`))
+        .catch(e => console.error(`[Push Trigger - Gate] Push notification delivery failed for student ${student.student_id}:`, e.message));
+    } else {
+      console.log(`[Push Trigger - Gate] Student ${student.student_id} has no registered FCM token. Skipping push.`);
+    }
 
     // Send WhatsApp notification for gate scan
     sendWhatsAppNotification({
@@ -529,10 +803,14 @@ app.get('/api/reception/summary', async (req, res) => {
     const students = await sheets.getStudents();
     const todayAttendance = await sheets.getTodayAttendance();
     const buses = await sheets.getBuses();
+    const today = todayStr();
+
+    const totalArrived = todayAttendance.filter(a => a.driver_name === 'Gate Scanner').length +
+      attendanceQueue.filter(a => a.driver_name === 'Gate Scanner' && a.date === today).length;
 
     const arrivedBuses = buses.filter(b => b.current_status === 'idle' && b.morning_start_time && (!b.return_start_time || new Date(b.morning_start_time) > new Date(b.return_start_time)));
     
-    const missedScans = students.filter(s => {
+    const missedScansList = students.filter(s => {
       const isBusArrived = arrivedBuses.some(b => b.bus_number === s.bus_number);
       if (!isBusArrived) return false;
       const boarded = todayAttendance.find(a => a.student_id === s.student_id && a.driver_name !== 'Gate Scanner') || attendanceQueue.find(a => a.student_id === s.student_id && a.driver_name !== 'Gate Scanner');
@@ -541,23 +819,51 @@ app.get('/api/reception/summary', async (req, res) => {
       return !gateScanned;
     });
 
-    res.json({ missedScans });
+    const missedScansCount = missedScansList.length;
+
+    const busMap = {};
+    missedScansList.forEach(s => {
+      if (s.bus_number) {
+        busMap[s.bus_number] = (busMap[s.bus_number] || 0) + 1;
+      }
+    });
+    const busesWithMissed = Object.entries(busMap).map(([bus_number, count]) => ({
+      bus_number,
+      count
+    }));
+
+    res.json({
+      totalArrived,
+      missedScans: missedScansCount,
+      busesWithMissed
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/lookup', async (req, res) => {
+app.post('/api/lookup', lookupLimiter, async (req, res) => {
   try {
     const { student_id, last4 } = req.body;
     if (!student_id || !last4) return res.status(400).json({ error: 'Student ID and PIN required' });
-    const student = await sheets.getStudentById(student_id.trim().toUpperCase());
+    
+    const cleanStudentId = String(student_id).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const cleanLast4 = String(last4).trim().replace(/\D/g, '');
+
+    if (!cleanStudentId || cleanLast4.length !== 4) {
+      return res.status(400).json({ error: 'Invalid Student ID or 4-digit PIN format' });
+    }
+
+    const student = await sheets.getStudentById(cleanStudentId);
     if (!student) return res.status(404).json({ error: 'Student not found' });
+    if (student.status === 'INACTIVE') {
+      return res.status(404).json({ error: 'Student is inactive (dropped out)' });
+    }
     
     const actualPhone = String(student.parent_whatsapp || '').trim();
     const phoneLast4 = actualPhone.length >= 4 ? actualPhone.slice(-4) : null;
     const adminSetLast4 = student.lookup_phone_last4;
     
     if (!phoneLast4 && !adminSetLast4) return res.status(401).json({ error: 'Phone not setup. Contact admin' });
-    if (last4 !== phoneLast4 && last4 !== adminSetLast4) return res.status(401).json({ error: 'Invalid credentials' });
+    if (cleanLast4 !== phoneLast4 && cleanLast4 !== adminSetLast4) return res.status(401).json({ error: 'Invalid credentials' });
     
     const attendance = await sheets.getTodayAttendance();
     const today = todayStr();
@@ -584,30 +890,31 @@ app.post('/api/lookup', async (req, res) => {
     const gateScans = records.filter(r => r.driver_name === 'Gate Scanner' || r.driver_name === 'Reception');
     const gateScanRecord = gateScans.length > 0 ? gateScans[gateScans.length - 1] : null;
 
-    if (bus && bus.current_status === 'return_running') {
-      if (returnScans.length > 0) {
+    const latestReturnScan = returnScans.length > 0 ? returnScans[returnScans.length - 1] : null;
+    const latestMorningScan = morningScans.length > 0 ? morningScans[morningScans.length - 1] : null;
+
+    const latestReturnTime = latestReturnScan ? new Date(latestReturnScan.timestamp).getTime() : 0;
+    const latestMorningTime = latestMorningScan ? new Date(latestMorningScan.timestamp).getTime() : 0;
+    const latestGateTime = gateScanRecord ? new Date(gateScanRecord.timestamp).getTime() : 0;
+
+    const maxTime = Math.max(latestReturnTime, latestMorningTime, latestGateTime);
+
+    if (maxTime > 0) {
+      if (maxTime === latestReturnTime) {
         status = 'Dropped Off';
-        timestamp = returnScans[returnScans.length - 1].timestamp;
+        timestamp = latestReturnScan.timestamp;
+      } else if (maxTime === latestGateTime) {
+        status = 'Reached College';
+        timestamp = gateScanRecord.timestamp;
       } else {
-        status = 'Bus Started (Return Journey)';
-      }
-    } else if (gateScanRecord) {
-      status = 'Reached College';
-      timestamp = gateScanRecord.timestamp;
-    } else if (bus && bus.current_status === 'morning_running') {
-      if (morningScans.length > 0) {
         status = 'Boarded';
-        timestamp = morningScans[morningScans.length - 1].timestamp;
-      } else {
-        status = 'Bus Started (On the way)';
+        timestamp = latestMorningScan.timestamp;
       }
     } else {
-      if (returnStart > 0 && returnScans.length > 0) {
-        status = 'Dropped Off';
-        timestamp = returnScans[returnScans.length - 1].timestamp;
-      } else if (morningScans.length > 0) {
-        status = 'At School';
-        timestamp = morningScans[morningScans.length - 1].timestamp;
+      if (bus && bus.current_status === 'return_running') {
+        status = 'Bus Started (Return Journey)';
+      } else if (bus && bus.current_status === 'morning_running') {
+        status = 'Bus Started (On the way)';
       } else {
         status = 'Not yet boarded';
       }
@@ -812,6 +1119,56 @@ app.post('/api/students', authBusIncharge, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.put('/api/students/:id/status', authAnyStaff, async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!status) return res.status(400).json({ error: 'Status is required' });
+    await sheets.updateStudentStatus(req.params.id, status);
+    res.json({ success: true, student_id: req.params.id, status });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/students/:id', authAdminOrAccountant, async (req, res) => {
+  try {
+    await sheets.deleteStudent(req.params.id);
+    res.json({ success: true, student_id: req.params.id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/students/:id/assign-qr', authAdminOrAccountant, async (req, res) => {
+  try {
+    const { newQrId } = req.body;
+    if (!newQrId) return res.status(400).json({ error: 'newQrId is required' });
+    await sheets.assignStudentQr(req.params.id, newQrId.trim());
+    res.json({ success: true, student_id: req.params.id, new_qr_id: newQrId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/students/:id/fcm-token', async (req, res) => {
+  const studentId = req.params.id;
+  const { fcmToken } = req.body;
+  
+  console.log(`[API] Received FCM token registration request for student: ${studentId}`);
+  if (!fcmToken) {
+    console.warn(`[API] Registration failed: Missing fcmToken for student ${studentId}`);
+    return res.status(400).json({ success: false, error: 'fcmToken is required' });
+  }
+  
+  const truncatedToken = fcmToken.length > 20 ? fcmToken.substring(0, 20) + '...' : fcmToken;
+  console.log(`[API] Token received (truncated): "${truncatedToken}"`);
+  
+  try {
+    await sheets.updateStudentFcmToken(studentId, fcmToken);
+    console.log(`[API] FCM token registered and saved successfully for student: ${studentId}`);
+    res.json({ success: true, message: 'FCM token saved successfully' });
+  } catch (err) {
+    console.error(`[API] Failed to save FCM token for student ${studentId}:`, err.message);
+    res.status(500).json({ success: false, error: 'Failed to write token to sheet database: ' + err.message });
+  }
+});
+
 // ─── QR CODE GENERATION ─────────────────────────────────────────────────────
 // Layout: 3 columns × 7 rows = 21 labels per A4 page, never split across pages.
 import QRCode from 'qrcode';
@@ -835,6 +1192,10 @@ function buildLabelHtml(students, qrDataUrls, title = 'QR Labels', showPrintBtn 
   }).join('');
 
   const totalPages = pages.length;
+
+  const downloadBtnHtml = students.length === 1 
+    ? `<a href="${qrDataUrls[0]}" download="QR_${students[0].student_id}.png" style="background: white; color: #2563eb; border: none; border-radius: 6px; padding: 8px 18px; font-weight: bold; cursor: pointer; font-size: 14px; text-decoration: none; display: inline-flex; align-items: center; justify-content: center;">⬇️ Download PNG</a>`
+    : '';
 
   return `<!DOCTYPE html>
 <html>
@@ -905,8 +1266,9 @@ function buildLabelHtml(students, qrDataUrls, title = 'QR Labels', showPrintBtn 
   ${showPrintBtn ? `
   <div class="toolbar">
     <h1>🚌 ${title}</h1>
-    <button onclick="window.print()">🖨️ Print</button>
-    <span class="note">21 per page (3 × 7) &nbsp;|&nbsp; ${students.length} students &nbsp;|&nbsp; ${totalPages} page${totalPages !== 1 ? 's' : ''}</span>
+    <button onclick="window.print()">🖨️ Print / Save as PDF</button>
+    ${downloadBtnHtml}
+    <span class="note">21 per page (3 × 7) &nbsp;|&nbsp; ${students.length} students &nbsp;|&nbsp; ${totalPages} page${totalPages !== 1 ? 's' : ''} ${students.length > 1 ? '&nbsp;(Tip: Select "Save as PDF" to download)' : ''}</span>
   </div>` : ''}
   ${pagesHtml}
 </body>
@@ -915,7 +1277,7 @@ function buildLabelHtml(students, qrDataUrls, title = 'QR Labels', showPrintBtn 
 
 
 // Single student → one label on a sheet
-app.get('/api/qr/generate/:id', authAdmin, async (req, res) => {
+app.get('/api/qr/generate/:id', authAdminOrAccountant, async (req, res) => {
   try {
     const student = await sheets.getStudentById(req.params.id);
     if (!student) return res.status(404).json({ error: 'Student not found' });
@@ -926,8 +1288,20 @@ app.get('/api/qr/generate/:id', authAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/api/qr/download/:id', authAdminOrAccountant, async (req, res) => {
+  try {
+    const student = await sheets.getStudentById(req.params.id);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    
+    const qrBuffer = await QRCode.toBuffer(student.student_id, { width: 400, margin: 1 });
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Disposition', `attachment; filename="QR_${student.student_id}_${student.name.replace(/\s+/g, '_')}.png"`);
+    res.send(qrBuffer);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // All students → full sheets of labels, grouped by bus for easy distribution
-app.get('/api/qr/print-all', authAdmin, async (req, res) => {
+app.get('/api/qr/print-all', authAdminOrAccountant, async (req, res) => {
   try {
     const busFilter = req.query.bus; // optional ?bus=3
     let students = await sheets.getStudents();
@@ -952,7 +1326,19 @@ app.get('/api/qr/print-all', authAdmin, async (req, res) => {
 
 
 
+app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 app.use(express.static(path.join(__dirname, '../client/dist')));
+
+app.get('/firebase-messaging-sw.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.sendFile(path.join(__dirname, '../client/dist/firebase-messaging-sw.js'));
+});
+
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.sendFile(path.join(__dirname, '../client/dist/manifest.json'));
+});
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../client/dist/index.html')));
 
 // Listen with a backlog of 1024 (default is 511) to handle burst concurrency

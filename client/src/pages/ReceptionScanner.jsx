@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Html5Qrcode } from 'html5-qrcode';
 import toast from 'react-hot-toast';
 import { api } from '../api';
-import { formatBusNumber, SCHOOL_NAME } from '../utils';
+import { formatBusNumber, SCHOOL_NAME, getFeeStatusDetails } from '../utils';
 import Spinner from '../components/Spinner';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -50,21 +50,31 @@ function ArrivalResult({ result, onDismiss }) {
     );
   }
 
+  const details = getFeeStatusDetails(result.student);
+  const isExpiringSoon = details.status === 'EXPIRING_SOON';
+
   return (
-    <div className="rounded-2xl p-6 text-white shadow-xl bg-paid">
-      <div className="flex items-center gap-4 mb-4">
-        <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center text-3xl">✅</div>
-        <div>
-          <h2 className="text-xl font-bold">{result.student.name}</h2>
-          <p className="text-green-100">Class {result.student.class}</p>
+    <div>
+      <div className="rounded-2xl p-6 text-white shadow-xl bg-paid">
+        <div className="flex items-center gap-4 mb-4">
+          <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center text-3xl">✅</div>
+          <div>
+            <h2 className="text-xl font-bold">{result.student.name}</h2>
+            <p className="text-green-100">Class {result.student.class}</p>
+          </div>
         </div>
+        <div className="bg-white/20 rounded-xl p-4 text-center">
+          <p className="text-xl font-bold">{result.message}</p>
+        </div>
+        <button onClick={onDismiss} className="mt-4 w-full bg-white/20 py-3 rounded-xl font-semibold">
+          {t('reception.scanNext')}
+        </button>
       </div>
-      <div className="bg-white/20 rounded-xl p-4 text-center">
-        <p className="text-xl font-bold">{result.message}</p>
-      </div>
-      <button onClick={onDismiss} className="mt-4 w-full bg-white/20 py-3 rounded-xl font-semibold">
-        {t('reception.scanNext')}
-      </button>
+      {isExpiringSoon && (
+        <div className="mt-4 bg-amber-500 text-white rounded-xl p-4 border-2 border-amber-600 shadow-lg text-center font-bold">
+          ⚠️ Fee Expiring Soon — Please pay within 3 days.
+        </div>
+      )}
     </div>
   );
 }
@@ -135,6 +145,30 @@ export default function ReceptionScanner() {
   const [duplicateWarning, setDuplicateWarning] = useState('');
   const html5QrRef = useRef(null);
   const processingRef = useRef(false);
+  const [scannerType, setScannerType] = useState(() => localStorage.getItem('reception_scanner_type') || 'camera');
+  const keyBuffer = useRef('');
+  const bufferTimeout = useRef(null);
+
+  const handleScannerTypeChange = (type) => {
+    setScannerType(type);
+    localStorage.setItem('reception_scanner_type', type);
+    if (type === 'bluetooth') {
+      stopScanner().catch(() => {});
+    }
+  };
+
+  const pairBluetoothDevice = async () => {
+    try {
+      if (!navigator.bluetooth) {
+        toast.error('Web Bluetooth is not supported by your browser/OS.');
+        return;
+      }
+      await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
+      toast.success('Scanner permission granted');
+    } catch (err) {
+      toast.error('Bluetooth pairing cancelled or failed: ' + err.message);
+    }
+  };
 
   const loadSummary = useCallback(async () => {
     try {
@@ -150,7 +184,7 @@ export default function ReceptionScanner() {
     return () => clearInterval(interval);
   }, [loggedIn, loadSummary]);
 
-  const stopScanner = useCallback(async () => {
+  async function stopScanner() {
     if (html5QrRef.current) {
       try {
         await html5QrRef.current.stop();
@@ -159,7 +193,7 @@ export default function ReceptionScanner() {
       html5QrRef.current = null;
     }
     setScanning(false);
-  }, []);
+  }
 
   const processStudent = useCallback(async (studentId) => {
     if (processingRef.current) return;
@@ -175,10 +209,21 @@ export default function ReceptionScanner() {
       }
       setResult(scanResult);
       toast.success('Arrival logged');
-      await loadSummary();
       setManualEntry(false);
       setStudentIdInput('');
-      await stopScanner();
+      
+      // Stop scanner and load summary in background to eliminate UI lag
+      stopScanner().catch(() => {});
+      loadSummary().catch(() => {});
+
+      // Auto-reopen scanner if fee is paid
+      if (!scanResult.isDue) {
+        setTimeout(() => {
+          setResult(null);
+          setDuplicateWarning('');
+          startScanner();
+        }, 1500);
+      }
     } catch (err) {
       toast.error(err.message || 'Scan failed');
     } finally {
@@ -205,7 +250,46 @@ export default function ReceptionScanner() {
     await processStudent(studentId);
   }, [processStudent]);
 
-  const startScanner = async () => {
+  const handleDismissResult = () => {
+    setResult(null);
+    setDuplicateWarning('');
+    startScanner(); // Restart scanning automatically
+  };
+
+  useEffect(() => {
+    if (!loggedIn || scannerType !== 'bluetooth' || result || scanning || manualEntry) return;
+
+    const handleKeyDown = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'Enter') {
+        const studentId = keyBuffer.current.trim();
+        keyBuffer.current = '';
+        if (studentId) {
+          e.preventDefault();
+          processStudent(studentId);
+        }
+        return;
+      }
+
+      if (e.key.length !== 1) return;
+
+      if (bufferTimeout.current) clearTimeout(bufferTimeout.current);
+      bufferTimeout.current = setTimeout(() => {
+        keyBuffer.current = '';
+      }, 1000);
+
+      keyBuffer.current += e.key;
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (bufferTimeout.current) clearTimeout(bufferTimeout.current);
+    };
+  }, [loggedIn, scannerType, result, scanning, manualEntry, processStudent]);
+
+  async function startScanner() {
     setManualEntry(false);
     setResult(null);
     setDuplicateWarning('');
@@ -238,12 +322,6 @@ export default function ReceptionScanner() {
           <p className="text-blue-100 text-sm">Reception | {SCHOOL_NAME}</p>
         </div>
         <div className="flex flex-col items-end gap-2">
-          <button 
-            onClick={toggleLang}
-            className="bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-full text-sm font-bold transition"
-          >
-            {lang === 'en' ? 'తెలుగు' : 'English'}
-          </button>
           <button
             onClick={() => { sessionStorage.removeItem('reception_auth'); setLoggedIn(false); }}
             className="text-sm bg-white/20 px-3 py-1 rounded-lg"
@@ -286,7 +364,7 @@ export default function ReceptionScanner() {
         )}
 
         {result && !scanning && !manualEntry && (
-          <ArrivalResult result={result} onDismiss={() => setResult(null)} />
+          <ArrivalResult result={result} onDismiss={handleDismissResult} />
         )}
 
         {scanning ? (
@@ -321,13 +399,51 @@ export default function ReceptionScanner() {
         ) : (
           !result && (
             <div className="space-y-4 mt-4">
-              <button
-                onClick={startScanner}
-                className="w-full bg-primary text-white font-bold py-10 rounded-2xl text-2xl shadow-xl flex flex-col items-center gap-2"
-              >
-                <span className="text-5xl">📷</span>
-                {t('reception.scanNext')}
-              </button>
+              {/* Scanner Mode Toggle */}
+              <div className="bg-white rounded-2xl shadow p-4 flex justify-between items-center mb-2 text-slate-800">
+                <span className="font-bold text-slate-700">Scanner Mode:</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleScannerTypeChange('camera')}
+                    className={`px-4 py-2 rounded-xl font-semibold text-sm transition ${scannerType === 'camera' ? 'bg-primary text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    📷 Camera
+                  </button>
+                  <button
+                    onClick={() => handleScannerTypeChange('bluetooth')}
+                    className={`px-4 py-2 rounded-xl font-semibold text-sm transition ${scannerType === 'bluetooth' ? 'bg-primary text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    🔌 Bluetooth
+                  </button>
+                </div>
+              </div>
+
+              {scannerType === 'bluetooth' ? (
+                <div className="w-full bg-slate-800 text-white font-bold py-10 px-4 rounded-2xl text-center shadow-xl border-2 border-slate-700 flex flex-col items-center gap-3">
+                  <span className="text-5xl animate-pulse">🔌</span>
+                  <div>
+                    <p className="text-xl">Bluetooth Scanner Active</p>
+                    <p className="text-xs font-normal text-slate-300 mt-2">
+                      Ready to scan. Point your Bluetooth scanner at the student's QR code and pull the trigger.
+                    </p>
+                  </div>
+                  <button
+                    onClick={pairBluetoothDevice}
+                    className="mt-2 text-xs bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg border border-white/10 transition"
+                  >
+                    Pair Scanner (Optional)
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={startScanner}
+                  className="w-full bg-primary text-white font-bold py-10 rounded-2xl text-2xl shadow-xl flex flex-col items-center gap-2"
+                >
+                  <span className="text-5xl">📷</span>
+                  {t('reception.scanNext')}
+                </button>
+              )}
+
               <button
                 onClick={() => { setManualEntry(true); setResult(null); }}
                 className="w-full bg-white text-primary font-bold py-5 rounded-2xl text-xl border-2 border-primary"

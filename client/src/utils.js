@@ -29,3 +29,28 @@ export function isFeeDue(student, currentDateStr = todayStr()) {
   return currentDateStr > student.fee_paid_until;
 }
 
+export function getFeeStatusDetails(student, currentDateStr = todayStr()) {
+  if ((student.fee_status || '').toUpperCase() === 'DUE') {
+    return { status: 'EXPIRED', colorClass: 'bg-due text-white', label: 'Fee Expired' };
+  }
+  const paidUntil = student.fee_paid_until;
+  if (!paidUntil || paidUntil.trim() === '') {
+    return { status: 'PAID', colorClass: 'bg-paid text-white', label: 'Fee Paid' };
+  }
+  
+  const today = new Date(currentDateStr);
+  today.setHours(0,0,0,0);
+  const expiry = new Date(paidUntil);
+  expiry.setHours(0,0,0,0);
+  
+  const diffTime = expiry.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  
+  if (diffDays < 0) {
+    return { status: 'EXPIRED', colorClass: 'bg-due text-white', label: 'Fee Expired' };
+  } else if (diffDays <= 3) {
+    return { status: 'EXPIRING_SOON', colorClass: 'bg-amber-500 text-white', label: `Expiring Soon (${diffDays}d)` };
+  }
+  return { status: 'PAID', colorClass: 'bg-paid text-white', label: 'Fee Paid' };
+}
+

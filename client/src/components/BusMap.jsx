@@ -80,7 +80,14 @@ export default function BusMap({
     const validBuses = (buses || []).filter((b) => {
       const lat = parseFloat(b.current_lat);
       const lng = parseFloat(b.current_lng);
-      return !isNaN(lat) && !isNaN(lng);
+      if (isNaN(lat) || isNaN(lng)) return false;
+
+      // Only show buses that are actively running and updated within the last 30 minutes
+      if (!b.last_updated) return false;
+      const lastUpdate = new Date(b.last_updated).getTime();
+      const isRecent = (Date.now() - lastUpdate) < 30 * 60 * 1000;
+      const isRunning = ['morning_running', 'return_running'].includes(b.current_status);
+      return isRunning && isRecent;
     });
 
     const latLngs = [];

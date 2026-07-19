@@ -20,3 +20,9 @@ body {
 .leaflet-tooltip.bus-marker-label::before {
   border-top-color: #2563eb;
 }
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

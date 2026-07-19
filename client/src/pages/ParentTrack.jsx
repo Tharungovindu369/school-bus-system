@@ -25,7 +25,7 @@ export default function ParentTrack() {
 
   useEffect(() => {
     loadBus();
-    const interval = setInterval(loadBus, 30000);
+    const interval = setInterval(loadBus, 10000);
     return () => clearInterval(interval);
   }, [loadBus]);
 
@@ -108,7 +108,8 @@ export default function ParentTrack() {
           )}
         </div>
 
-        <div className="mt-4 bg-blue-50 rounded-xl p-4 text-sm text-slate-600 text-center">          Location refreshes automatically every 30 seconds
+        <div className="mt-4 bg-blue-50 rounded-xl p-4 text-sm text-slate-600 text-center">
+          Location refreshes automatically every 10 seconds
         </div>
       </div>
     </div>

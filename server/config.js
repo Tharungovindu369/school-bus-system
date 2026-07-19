@@ -46,6 +46,7 @@ export const config = {
   watiApiEndpoint: process.env.WATI_API_ENDPOINT || '',
   googleServiceAccountEmail: googleCreds.email,
   googlePrivateKey: googleCreds.privateKey,
+  googleDriveFolderId: process.env.GOOGLE_DRIVE_FOLDER_ID || '',
   dropoffCutoffTime: process.env.DROPOFF_CUTOFF_TIME || '15:00',
   notDroppedAlertTime: process.env.NOT_DROPPED_ALERT_TIME || '17:00',
   clientUrl: (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, ''),
@@ -62,7 +63,7 @@ export function getDriverPins() {
     }
   }
   const pins = {};
-  for (let i = 1; i <= 44; i++) {
+  for (let i = 1; i <= 18; i++) {
     pins[String(i)] = String(i).padStart(4, '0');
   }
   return pins;

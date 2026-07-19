@@ -19,6 +19,10 @@ export const translations = {
       phoneLabel: 'Parent Phone (Last 4 Digits)',
       checkStatusBtn: 'Check Status',
       liveLocation: 'Live Location',
+      nextStopUpdate: 'Live Bus Stop Update',
+      nextStop: 'Next Stop:',
+      feeExpiringSoon: '⚠️ Fee expiring soon, please pay',
+      feeExpired: '⚠️ Fee expired',
       checkAnotherBtn: 'Check Another',
       lastUpdated: 'Last updated:',
       errorBoth: 'Please enter both Student ID and the last 4 digits of your phone number.',
@@ -64,7 +68,13 @@ export const translations = {
       scanStudentQr: 'Scan Student QR',
       dismissError: 'Dismiss Error',
       retry: 'Retry',
-      failedTo: 'Failed to'
+      failedTo: 'Failed to',
+      fuelOdometerLabel: 'Fuel / Odometer Reading',
+      capturePhotoLabel: '📷 Capture Odometer Photo (Auto-Extract)',
+      journeyReasonLabel: 'Purpose / Reason for Journey',
+      startTripButton: 'Start Trip',
+      endingFuelLabel: 'Ending Fuel / Odometer Reading',
+      logout: 'Logout'
     },
     reception: {
       loginTitle: 'College Gate Scanner',
@@ -97,6 +107,17 @@ export const translations = {
       busesRunning: 'Buses Running',
       feePending: 'Fee Pending',
       incidentsToday: 'Incidents Today'
+    },
+    home: {
+      title: 'College Bus Management',
+      subtitle: 'Transport System',
+      driverApp: 'Driver App',
+      adminDashboard: 'Admin Dashboard',
+      gateScanner: 'College Gate Scanner',
+      checkStatus: "Check Your Child's Bus Status",
+      checkStatusInfo: "Use your child's Student ID and the last 4 digits of your registered phone number to check their status.",
+      printInstructions: '🖨️ Print Parent Instructions',
+      demoTracking: 'Parent Tracking (Demo Bus 1)'
     }
   },
   te: {
@@ -119,6 +140,10 @@ export const translations = {
       phoneLabel: 'తల్లిదండ్రుల ఫోన్ (చివరి 4 అంకెలు)',
       checkStatusBtn: 'స్థితిని తనిఖీ చేయండి',
       liveLocation: 'ప్రత్యక్ష స్థానం',
+      nextStopUpdate: 'లైవ్ బస్ స్టాప్ అప్‌డేట్',
+      nextStop: 'తదుపరి స్టాప్:',
+      feeExpiringSoon: '⚠️ ఫీజు త్వరలో గడువు ముగుస్తుంది, దయచేసి చెల్లించండి',
+      feeExpired: '⚠️ ఫీజు గడువు ముగిసింది',
       checkAnotherBtn: 'మరొకటి తనిఖీ చేయండి',
       lastUpdated: 'చివరిగా అప్‌డేట్ చేయబడింది:',
       errorBoth: 'దయచేసి విద్యార్థి ID మరియు మీ ఫోన్ నంబర్ చివరి 4 అంకెలను నమోదు చేయండి.',
@@ -164,7 +189,13 @@ export const translations = {
       scanStudentQr: 'విద్యార్థి QR ను స్కాన్ చేయండి',
       dismissError: 'లోపాన్ని విస్మరించండి',
       retry: 'మళ్లీ ప్రయత్నించండి',
-      failedTo: 'విఫలమైంది'
+      failedTo: 'విఫలమైంది',
+      fuelOdometerLabel: 'ఇంధనం / ఓడోమీటర్ రీడింగ్',
+      capturePhotoLabel: '📷 ఓడోమీటర్ ఫోటో తీయండి (ఆటో-ఎక్స్‌ట్రాక్ట్)',
+      journeyReasonLabel: 'ప్రయాణ ఉద్దేశం / కారణం',
+      startTripButton: 'ప్రయాణాన్ని ప్రారంభించండి',
+      endingFuelLabel: 'ముగింపు ఇంధనం / ఓడోమీటర్ రీడింగ్',
+      logout: 'లాగౌట్'
     },
     reception: {
       loginTitle: 'కళాశాల గేట్ స్కానర్',
@@ -197,6 +228,17 @@ export const translations = {
       busesRunning: 'నడుస్తున్న బస్సులు',
       feePending: 'పెండింగ్ ఫీజు',
       incidentsToday: 'ఈ రోజు సంఘటనలు'
+    },
+    home: {
+      title: 'కళాశాల బస్సు నిర్వహణ',
+      subtitle: 'రవాణా వ్యవస్థ',
+      driverApp: 'డ్రైవర్ యాప్',
+      adminDashboard: 'అడ్మిన్ డాష్‌బోర్డ్',
+      gateScanner: 'కళాశాల గేట్ స్కానర్',
+      checkStatus: 'మీ పిల్లల బస్సు స్థితిని తనిఖీ చేయండి',
+      checkStatusInfo: 'మీ పిల్లల స్థితిని తనిఖీ చేయడానికి విద్యార్థి ID మరియు మీ రిజిస్టర్డ్ ఫోన్ నంబర్ యొక్క చివరి 4 అంకెలను ఉపయోగించండి.',
+      printInstructions: '🖨️ పేరెంట్ ఇన్స్ట్రక్షన్స్ ప్రింట్ చేయండి',
+      demoTracking: 'తల్లిదండ్రుల ట్రాకింగ్ (డెమో బస్ 1)'
     }
   }
 };

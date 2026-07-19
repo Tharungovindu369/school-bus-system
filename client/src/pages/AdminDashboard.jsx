@@ -5,10 +5,322 @@ import Spinner from '../components/Spinner';
 import BusMap from '../components/BusMap';
 import ManageCredentials from '../components/ManageCredentials';
 import StudentLookup from '../components/StudentLookup';
+import { getFeeStatusDetails, formatBusNumber, busNumberKey } from '../utils';
+import { Html5Qrcode } from 'html5-qrcode';
+import { useLanguage } from '../contexts/LanguageContext';
 
 
 
 
+
+function AddBusModal({ onClose, onSave }) {
+  const [formData, setFormData] = useState({
+    bus_number: '',
+    driver_name: '',
+    driver_phone: '',
+    route_name: '',
+    capacity: '50'
+  });
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.bus_number.trim()) {
+      toast.error('Bus Number is required');
+      return;
+    }
+    setLoading(true);
+    try {
+      await onSave({
+        bus_number: formData.bus_number.trim(),
+        driver_name: formData.driver_name.trim(),
+        driver_phone: formData.driver_phone.trim(),
+        route_name: formData.route_name.trim(),
+        capacity: formData.capacity.trim()
+      });
+      onClose();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 animate-fadeIn">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden text-slate-900 text-left">
+        <div className="bg-primary p-6 text-white text-center">
+          <h2 className="text-2xl font-bold">Add New Bus</h2>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Bus Number *</label>
+            <input
+              type="text"
+              value={formData.bus_number}
+              onChange={e => setFormData({ ...formData, bus_number: e.target.value })}
+              className="w-full border p-2.5 rounded-xl bg-slate-50 focus:outline-none"
+              placeholder="e.g. Bus 17"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Route Name</label>
+            <input
+              type="text"
+              value={formData.route_name}
+              onChange={e => setFormData({ ...formData, route_name: e.target.value })}
+              className="w-full border p-2.5 rounded-xl bg-slate-50 focus:outline-none"
+              placeholder="e.g. Route 17"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Driver Name</label>
+            <input
+              type="text"
+              value={formData.driver_name}
+              onChange={e => setFormData({ ...formData, driver_name: e.target.value })}
+              className="w-full border p-2.5 rounded-xl bg-slate-50 focus:outline-none"
+              placeholder="e.g. Ramesh"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Driver Phone</label>
+            <input
+              type="text"
+              value={formData.driver_phone}
+              onChange={e => setFormData({ ...formData, driver_phone: e.target.value })}
+              className="w-full border p-2.5 rounded-xl bg-slate-50 focus:outline-none"
+              placeholder="e.g. 919876543210"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Capacity</label>
+            <input
+              type="number"
+              value={formData.capacity}
+              onChange={e => setFormData({ ...formData, capacity: e.target.value })}
+              className="w-full border p-2.5 rounded-xl bg-slate-50 focus:outline-none"
+              placeholder="50"
+            />
+          </div>
+          <div className="flex gap-4 pt-4">
+            <button type="button" onClick={onClose} className="flex-1 bg-slate-200 text-slate-700 py-3 rounded-xl font-bold">Cancel</button>
+            <button type="submit" disabled={loading} className="flex-1 bg-primary text-white py-3 rounded-xl font-bold flex justify-center">
+              {loading ? <Spinner size="sm" /> : 'Save Bus'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function StopMapPicker({ lat, lng, onChange }) {
+  const mapRef = useRef(null);
+  const mapInstance = useRef(null);
+  const markerRef = useRef(null);
+
+  useEffect(() => {
+    if (!window.L || !mapRef.current) return;
+
+    const initialLat = parseFloat(lat) || 16.7375;
+    const initialLng = parseFloat(lng) || 78.0017;
+
+    // Initialize map
+    const map = window.L.map(mapRef.current).setView([initialLat, initialLng], 13);
+    mapInstance.current = map;
+
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Create marker
+    const marker = window.L.marker([initialLat, initialLng], { draggable: true }).addTo(map);
+    markerRef.current = marker;
+
+    // Handle marker drag
+    marker.on('dragend', () => {
+      const position = marker.getLatLng();
+      onChange(position.lat.toFixed(6), position.lng.toFixed(6));
+    });
+
+    // Handle map click
+    map.on('click', (e) => {
+      const position = e.latlng;
+      marker.setLatLng(position);
+      onChange(position.lat.toFixed(6), position.lng.toFixed(6));
+    });
+
+    // Fix map loading sizes
+    setTimeout(() => map.invalidateSize(), 200);
+
+    return () => {
+      map.remove();
+    };
+  }, []);
+
+  // Update marker position if coordinates change externally
+  useEffect(() => {
+    if (!mapInstance.current || !markerRef.current) return;
+    const parsedLat = parseFloat(lat);
+    const parsedLng = parseFloat(lng);
+    if (isNaN(parsedLat) || isNaN(parsedLng)) return;
+
+    const currentPos = markerRef.current.getLatLng();
+    if (Math.abs(currentPos.lat - parsedLat) > 0.0001 || Math.abs(currentPos.lng - parsedLng) > 0.0001) {
+      markerRef.current.setLatLng([parsedLat, parsedLng]);
+      mapInstance.current.setView([parsedLat, parsedLng]);
+    }
+  }, [lat, lng]);
+
+  return (
+    <div className="border border-slate-200 rounded-xl overflow-hidden mb-3 animate-fadeIn">
+      <div ref={mapRef} className="w-full h-[180px] bg-slate-100" />
+      <div className="bg-slate-50 p-2 text-center text-[10px] text-slate-400 font-semibold border-t">
+        🖱️ Click anywhere on the map or drag the marker to pick coordinates
+      </div>
+    </div>
+  );
+}
+
+function AssignQrModal({ student, onClose, onSave }) {
+  const [newQrId, setNewQrId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
+  const html5QrRef = useRef(null);
+
+  const startScanning = () => {
+    setCameraActive(true);
+    setTimeout(async () => {
+      try {
+        const scanner = new Html5Qrcode('qr-reader-assign');
+        html5QrRef.current = scanner;
+        await scanner.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 220, height: 220 } },
+          (decodedText) => {
+            setNewQrId(decodedText);
+            stopScanning();
+            toast.success(`Scanned: ${decodedText}`);
+          },
+          () => {} // silent fail
+        );
+      } catch (err) {
+        console.error('Failed to start scanner:', err);
+        toast.error('Could not access camera scanner');
+        setCameraActive(false);
+      }
+    }, 100);
+  };
+
+  const stopScanning = () => {
+    if (html5QrRef.current) {
+      html5QrRef.current.stop().catch(() => {}).then(() => {
+        html5QrRef.current = null;
+        setCameraActive(false);
+      });
+    } else {
+      setCameraActive(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (html5QrRef.current) {
+        html5QrRef.current.stop().catch(() => {});
+      }
+    };
+  }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!newQrId.trim()) return;
+    setLoading(true);
+    try {
+      await onSave(student.student_id, newQrId.trim());
+      onClose();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[60]">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 text-slate-900 text-left animate-fadeIn">
+        <h3 className="text-xl font-bold mb-1">Assign QR Card</h3>
+        <p className="text-sm text-slate-500 mb-4">
+          Assign a physical QR card to <strong className="text-slate-800">{student.name}</strong>
+        </p>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {cameraActive ? (
+            <div className="relative rounded-xl overflow-hidden border border-slate-300 bg-black aspect-video flex flex-col justify-end mb-2">
+              <div id="qr-reader-assign" className="absolute inset-0 w-full h-full object-cover" />
+              <div className="relative z-10 p-3 bg-gradient-to-t from-black/80 to-transparent text-center">
+                <button
+                  type="button"
+                  onClick={stopScanning}
+                  className="bg-slate-700 hover:bg-slate-600 text-white font-bold px-4 py-1.5 rounded-lg text-xs"
+                >
+                  Close Camera
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+              <span className="text-xs font-semibold text-slate-500 block mb-2">Use Device Camera</span>
+              <button
+                type="button"
+                onClick={startScanning}
+                className="w-full bg-primary text-white text-xs font-bold py-2 rounded-xl flex items-center justify-center gap-1.5 hover:bg-primary/95 transition mb-1"
+              >
+                📷 Open Camera Scanner
+              </button>
+            </div>
+          )}
+
+          <div>
+            <label className="text-xs font-semibold text-slate-600 block mb-1">
+              Scan Card with Barcode Gun or Type Code
+            </label>
+            <input
+              type="text"
+              required
+              autoFocus
+              placeholder="Click here & scan/type QR code..."
+              value={newQrId}
+              onChange={(e) => setNewQrId(e.target.value)}
+              className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+            />
+            <p className="text-[10px] text-slate-400 mt-1">
+              Tip: If using a Barcode wedge gun, focus this box and pull the scanner trigger.
+            </p>
+          </div>
+
+          <div className="flex gap-2 justify-end pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-semibold text-xs transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading || !newQrId.trim()}
+              className="px-4 py-2 bg-primary hover:bg-primary/95 text-white font-bold rounded text-xs transition"
+            >
+              {loading ? 'Saving...' : '🔗 Save Assignment'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 function ChangeBusModal({ student, onClose, onSave, buses }) {
   const [busNumber, setBusNumber] = useState(student.bus_number || '');
@@ -42,16 +354,29 @@ function ChangeBusModal({ student, onClose, onSave, buses }) {
   );
 }
 
-function ManageStudentModal({ student, auth, onClose, onUpdateFee, onChangeBus, onGenerateQR }) {
+function ManageStudentModal({ student, auth, onClose, onUpdateFee, onChangeBus, onGenerateQR, onDeleteStudent, onDownloadQR, onAssignQR }) {
   const role = auth?.role || (typeof auth === 'string' ? 'admin' : '');
   
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 text-slate-900 text-left">
         <h3 className="text-xl font-bold mb-1">{student.name}</h3>
-        <p className="text-sm text-slate-500 mb-4">{student.student_id} • Bus {student.bus_number}</p>
+        <p className="text-sm text-slate-500 mb-4 flex items-center gap-1.5">
+          <span>{student.student_id}</span>
+          <span>&bull;</span>
+          <span>{formatBusNumber(student.bus_number)}</span>
+          <span>&bull;</span>
+          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800">
+            Active
+          </span>
+        </p>
         
         <div className="space-y-3">
+          {['admin', 'accountant'].includes(role) && (
+            <button onClick={onAssignQR} className="w-full p-3 border border-primary/20 rounded-lg text-left hover:bg-slate-50 font-bold flex items-center justify-between text-primary bg-primary/5">
+              🔗 Bind/Assign QR Card <span>➔</span>
+            </button>
+          )}
           {['admin', 'accountant'].includes(role) && (
             <button onClick={onUpdateFee} className="w-full p-3 border rounded-lg text-left hover:bg-slate-50 font-semibold flex items-center justify-between">
               Update Fee Status <span>➔</span>
@@ -62,10 +387,26 @@ function ManageStudentModal({ student, auth, onClose, onUpdateFee, onChangeBus, 
               Change Bus Assignment <span>➔</span>
             </button>
           )}
-          {role === 'admin' && (
-            <button onClick={onGenerateQR} className="w-full p-3 border rounded-lg text-left hover:bg-slate-50 font-semibold flex items-center justify-between text-primary">
-              Generate QR Code <span>➔</span>
-            </button>
+          {['admin', 'accountant'].includes(role) && (
+            <>
+              <button onClick={onGenerateQR} className="w-full p-3 border rounded-lg text-left hover:bg-slate-50 font-semibold flex items-center justify-between text-primary">
+                View/Print QR Code <span>➔</span>
+              </button>
+              <button onClick={onDownloadQR} className="w-full p-3 border rounded-lg text-left hover:bg-slate-50 font-semibold flex items-center justify-between text-emerald-600">
+                📥 Download QR Code (PNG) <span>➔</span>
+              </button>
+
+              <button 
+                onClick={() => {
+                  if (window.confirm(`Are you sure you want to permanently delete student ${student.name} (${student.student_id})? This action cannot be undone.`)) {
+                    onDeleteStudent(student.student_id);
+                  }
+                }} 
+                className="w-full p-3 border border-red-200 rounded-lg text-left hover:bg-red-50 font-semibold flex items-center justify-between text-red-600"
+              >
+                🚨 Delete Student <span>➔</span>
+              </button>
+            </>
           )}
         </div>
         
@@ -108,7 +449,19 @@ function UpdatePaymentModal({ student, onClose, onSave }) {
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
         <h3 className="text-xl font-bold mb-4">Update Fee - {student.name}</h3>
-        <p className="text-sm text-slate-500 mb-2">Current status: <span className={`font-bold ${(student.fee_status||'').toUpperCase()==='DUE'?'text-red-500':'text-green-600'}`}>{student.fee_status || 'DUE'}</span></p>
+        {(() => {
+          const feeDetails = getFeeStatusDetails(student);
+          const colorClass = feeDetails.status === 'EXPIRED'
+            ? 'text-red-500'
+            : feeDetails.status === 'EXPIRING_SOON'
+            ? 'text-amber-500'
+            : 'text-green-600';
+          return (
+            <p className="text-sm text-slate-500 mb-2">
+              Current status: <span className={`font-bold ${colorClass}`}>{feeDetails.label}</span>
+            </p>
+          );
+        })()}
         <select value={duration} onChange={e => setDuration(e.target.value)} className="w-full border p-2 rounded mb-4">
           <option value="">-- Select Action --</option>
           <option value="mark due">🔴 Mark as Due</option>
@@ -318,6 +671,7 @@ function AddStudentModal({ onClose, onSave }) {
 }
 
 export default function AdminDashboard() {
+  const { lang, toggleLang } = useLanguage();
   const [auth, setAuth] = useState(() => {
     const a = sessionStorage.getItem('admin_auth');
     try { return a ? JSON.parse(a) : null; } catch { return null; }
@@ -329,7 +683,9 @@ export default function AdminDashboard() {
   const [selectedStudentForFee, setSelectedStudentForFee] = useState(null);
   const [selectedStudentForManage, setSelectedStudentForManage] = useState(null);
   const [selectedStudentForBus, setSelectedStudentForBus] = useState(null);
+  const [selectedStudentForQr, setSelectedStudentForQr] = useState(null);
   const [showAddStudent, setShowAddStudent] = useState(false);
+  const [showAddBus, setShowAddBus] = useState(false);
   const [selectedBusForEdit, setSelectedBusForEdit] = useState(null);
   const [incidents, setIncidents] = useState([]);
   const [reassignForm, setReassignForm] = useState({ bus_number: '', temp_driver: '', temp_driver_phone: '', temp_driver_bus: '', reason: '', end_date: '' });
@@ -339,21 +695,32 @@ export default function AdminDashboard() {
   const [busFilter, setBusFilter] = useState('');
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
+  const [odoStats, setOdoStats] = useState({ stats: {}, logs: [] });
+  const [stops, setStops] = useState([]);
+  const [newStop, setNewStop] = useState({ bus_number: '', stop_name: '', latitude: '', longitude: '', sequence: '' });
+  const [submittingStop, setSubmittingStop] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchingMap, setSearchingMap] = useState(false);
   const feeUpdateLock = useRef(false);
 
   const loadData = useCallback(async () => {
     if (!auth) return;
     setLoading(true);
     try {
-      const [dash, studs, att, busList, incs, reass] = await Promise.all([
+      const [dash, studs, att, busList, incs, reass, odos, stopsList] = await Promise.all([
         api.getDashboard(auth).catch(() => null),
         ['admin', 'accountant', 'bus_incharge'].includes(auth.role) ? api.getStudents(auth).catch(() => []) : Promise.resolve([]),
         auth.role === 'admin' ? api.getAttendance(todayStr(), auth).catch(() => []) : Promise.resolve([]),
         ['admin', 'bus_incharge'].includes(auth.role) ? api.getBuses(auth).catch(() => []) : Promise.resolve([]),
         auth.role === 'admin' ? api.getIncidents(auth).catch(() => []) : Promise.resolve([]),
-        ['admin', 'bus_incharge'].includes(auth.role) ? api.getActiveReassignments(auth).catch(() => []) : Promise.resolve([])
+        ['admin', 'bus_incharge'].includes(auth.role) ? api.getActiveReassignments(auth).catch(() => []) : Promise.resolve([]),
+        ['admin', 'bus_incharge'].includes(auth.role) ? api.getAdminOdometerStats(auth).catch(() => ({ stats: {}, logs: [] })) : Promise.resolve({ stats: {}, logs: [] }),
+        ['admin', 'bus_incharge'].includes(auth.role) ? api.getStops(auth).catch(() => []) : Promise.resolve([])
       ]);
       if (dash) setStats({ ...dash, activeReassignments: reass });
+      if (odos) setOdoStats(odos);
+      if (stopsList) setStops(stopsList);
       // Don't overwrite students if a fee update just happened
       if (studs && !feeUpdateLock.current) setStudents(studs);
       setAttendance(att || []);
@@ -371,7 +738,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 30000);
+    const interval = setInterval(loadData, 10000);
     return () => clearInterval(interval);
   }, [loadData]);
 
@@ -419,6 +786,103 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleAssignQr = async (studentId, newQrId) => {
+    try {
+      await api.assignStudentQr(studentId, newQrId, auth);
+      toast.success('✅ QR Code assigned successfully!');
+      loadData();
+    } catch (err) {
+      toast.error(err.message || 'Failed to assign QR Code');
+      throw err;
+    }
+  };
+
+  const handleMapSearch = async (e) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    setSearchingMap(true);
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(searchQuery)}`);
+      const data = await res.json();
+      setSearchResults(data);
+      if (data.length === 0) {
+        toast.error('No locations found for this query');
+      }
+    } catch (err) {
+      toast.error('Failed to search location');
+    } finally {
+      setSearchingMap(false);
+    }
+  };
+
+  const handleSelectSearchResult = (result) => {
+    setNewStop(prev => ({
+      ...prev,
+      latitude: parseFloat(result.lat).toFixed(6),
+      longitude: parseFloat(result.lon).toFixed(6),
+      stop_name: prev.stop_name || result.display_name.split(',')[0]
+    }));
+    setSearchResults([]);
+    setSearchQuery(result.display_name.split(',')[0]);
+    toast.success(`Selected: ${result.display_name.split(',')[0]}`);
+  };
+
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error('Geolocation is not supported by your browser');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setNewStop(prev => ({
+          ...prev,
+          latitude: position.coords.latitude.toFixed(6),
+          longitude: position.coords.longitude.toFixed(6)
+        }));
+        toast.success('Auto-filled current location!');
+      },
+      (error) => {
+        toast.error(`Geolocation error: ${error.message}`);
+      }
+    );
+  };
+
+  const handleAddStopSubmit = async (e) => {
+    e.preventDefault();
+    if (!newStop.bus_number || !newStop.stop_name || !newStop.latitude || !newStop.longitude || !newStop.sequence) {
+      toast.error('Please fill in all stop details');
+      return;
+    }
+    setSubmittingStop(true);
+    try {
+      await api.addStop({
+        bus_number: newStop.bus_number,
+        stop_name: newStop.stop_name,
+        latitude: parseFloat(newStop.latitude),
+        longitude: parseFloat(newStop.longitude),
+        sequence: parseInt(newStop.sequence, 10)
+      }, auth);
+      toast.success('Stop location added successfully!');
+      setNewStop({ bus_number: '', stop_name: '', latitude: '', longitude: '', sequence: '' });
+      loadData();
+    } catch (err) {
+      toast.error(err.message || 'Failed to add stop');
+    } finally {
+      setSubmittingStop(false);
+    }
+  };
+
+  const handleDeleteStopClick = async (stopId, stopName) => {
+    if (!window.confirm(`Are you sure you want to delete stop "${stopName}"?`)) return;
+    try {
+      await api.deleteStop(stopId, auth);
+      toast.success('Stop location deleted!');
+      loadData();
+    } catch (err) {
+      toast.error(err.message || 'Failed to delete stop');
+    }
+  };
+
   const handleGenerateQR = (student) => {
     window.open(`/api/qr/generate/${student.student_id}?token=${auth.token || auth}`, '_blank');
   };
@@ -447,6 +911,24 @@ export default function AdminDashboard() {
       toast.error(err.message || 'Failed to update fee');
     }
   };
+
+
+
+  const handleDeleteStudent = async (studentId) => {
+    try {
+      await api.deleteStudent(studentId, auth);
+      toast.success('Student deleted successfully');
+      setSelectedStudentForManage(null);
+      loadData();
+    } catch (err) {
+      toast.error(err.message || 'Failed to delete student');
+    }
+  };
+
+  const handleDownloadQR = (student) => {
+    window.open(`/api/qr/download/${student.student_id}?token=${auth.token || auth}`, '_blank');
+    setSelectedStudentForManage(null);
+  };
   
   const handleEditBus = async (busNumber, driverName, driverPhone) => {
     try {
@@ -455,6 +937,17 @@ export default function AdminDashboard() {
       loadData();
     } catch (err) {
       toast.error(err.message);
+    }
+  };
+
+  const handleAddBus = async (bus) => {
+    try {
+      await api.addBus(bus, auth);
+      toast.success('✅ New bus added successfully!');
+      loadData();
+    } catch (err) {
+      toast.error(err.message || 'Failed to add bus');
+      throw err;
     }
   };
 
@@ -480,8 +973,19 @@ const exportTodayCSV = () => {
   });
 
   const filteredStudents = students.filter((s) => {
-    if (feeFilter === 'ALL') return true;
-    return (s.fee_status || '').toUpperCase() === feeFilter;
+    // fee status filter
+    const matchFee = feeFilter === 'ALL' || (s.fee_status || '').toUpperCase() === feeFilter;
+    
+    // bus filter
+    const matchBus = !busFilter || String(s.bus_number) === busFilter;
+    
+    // search text filter
+    const matchSearch = !search ||
+      s.name?.toLowerCase().includes(search.toLowerCase()) ||
+      s.student_id?.toUpperCase().includes(search.toUpperCase()) ||
+      s.class?.toLowerCase().includes(search.toLowerCase());
+      
+    return matchFee && matchBus && matchSearch;
   });
 
   if (!auth) return <AdminLogin onLogin={setAuth} />;
@@ -490,20 +994,28 @@ const exportTodayCSV = () => {
     <div className="min-h-screen bg-slate-100">
       <header className="bg-primary text-white p-4 shadow flex justify-between items-center">
         <h1 className="text-xl font-bold">Admin Dashboard ({auth.role})</h1>
-        <button
-          onClick={() => { sessionStorage.removeItem('admin_auth'); setAuth(null); }}
-          className="text-sm bg-white/20 px-3 py-1 rounded-lg"
-        >
-          Logout
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={toggleLang}
+            className="text-xs bg-white/20 hover:bg-white/30 text-white font-bold py-1.5 px-3 rounded-xl transition"
+          >
+            {lang === 'en' ? 'తెలుగు' : 'English'}
+          </button>
+          <button
+            onClick={() => { sessionStorage.removeItem('admin_auth'); setAuth(null); }}
+            className="text-sm bg-white/20 px-3 py-1 rounded-lg"
+          >
+            Logout
+          </button>
+        </div>
       </header>
 
       <div className="flex overflow-x-auto bg-white border-b">
         {(()=>{
           let t = [];
-          if (auth.role === 'admin') t = ['overview', 'attendance', 'students', 'buses', 'reassignment', 'incidents', 'lookup', 'manage_credentials'];
+          if (auth.role === 'admin') t = ['overview', 'attendance', 'students', 'buses', 'reassignment', 'incidents', 'fuel_odometer', 'route_stops', 'lookup', 'manage_credentials'];
           if (auth.role === 'accountant') t = ['overview', 'students'];
-          if (auth.role === 'bus_incharge') t = ['overview', 'buses', 'reassignment'];
+          if (auth.role === 'bus_incharge') t = ['overview', 'students', 'buses', 'reassignment', 'fuel_odometer', 'route_stops'];
           return t;
         })().map((tab) => (
           <button
@@ -572,7 +1084,7 @@ const exportTodayCSV = () => {
                       <tr key={i} className="border-t hover:bg-slate-50">
                         <td className="p-3">{a.boarded_at}</td>
                         <td className="p-3 font-medium">{a.student_name}</td>
-                        <td className="p-3">Bus {a.bus_number}</td>
+                        <td className="p-3">{formatBusNumber(a.bus_number)}</td>
                         <td className="p-3">{a.stop_name}</td>
                         <td className="p-3">{a.driver_name}</td>
                       </tr>
@@ -588,12 +1100,37 @@ const exportTodayCSV = () => {
 
           {activeTab === 'students' && (
             <div>
-              <div className="flex flex-wrap gap-2 mb-4 items-center">
+              <div className="flex flex-wrap gap-2 mb-4 items-center w-full">
                 {['admin', 'bus_incharge'].includes(auth?.role || (typeof auth === 'string' ? 'admin' : '')) && (
-                  <button onClick={() => setShowAddStudent(true)} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold mr-4">
+                  <button onClick={() => setShowAddStudent(true)} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold mr-2">
                     + Add Student
                   </button>
                 )}
+                
+                <input
+                  type="text"
+                  placeholder="Search name or ID..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[150px]"
+                />
+
+                <select
+                  value={busFilter}
+                  onChange={(e) => setBusFilter(e.target.value)}
+                  className="border rounded-lg px-3 py-2 text-sm bg-white font-semibold text-slate-700"
+                >
+                  <option value="">All Buses</option>
+                  {Array.from(new Set(students.map((s) => s.bus_number)))
+                    .filter(Boolean)
+                    .sort((a, b) => (parseInt(busNumberKey(a), 10) || 0) - (parseInt(busNumberKey(b), 10) || 0))
+                    .map((b) => (
+                      <option key={b} value={b}>{formatBusNumber(b)}</option>
+                    ))}
+                </select>
+
+
+
                 {['ALL', 'PAID', 'DUE'].map((f) => (
                   <button
                     key={f}
@@ -620,15 +1157,6 @@ const exportTodayCSV = () => {
                 >
                   🖨️ Print All QR Labels
                 </button>
-                {busFilter !== 'ALL' && (
-                  <button
-                    onClick={() => handlePrintBusQR(busFilter)}
-                    className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold"
-                    title={`Print QR labels for Bus ${busFilter} only`}
-                  >
-                    🖨️ Print Bus {busFilter} QR
-                  </button>
-                )}
               </div>
               <div className="bg-white rounded-xl shadow overflow-x-auto">
                 <table className="w-full text-sm">
@@ -641,17 +1169,22 @@ const exportTodayCSV = () => {
                   </thead>
                   <tbody>
                     {filteredStudents.map((s) => {
-                      const isPaid = (s.fee_status || '').toUpperCase() === 'PAID';
+                      const feeDetails = getFeeStatusDetails(s);
+                      const badgeBgClass = feeDetails.status === 'EXPIRED'
+                        ? 'bg-due'
+                        : feeDetails.status === 'EXPIRING_SOON'
+                        ? 'bg-amber-500 animate-pulse'
+                        : 'bg-paid';
                       return (
                         <tr key={s.student_id} className="border-t hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedStudentForManage(s)}>
                           <td className="p-3">{s.student_id}</td>
                           <td className="p-3 font-medium">{s.name}</td>
                           <td className="p-3">{s.class}</td>
-                          <td className="p-3">Bus {s.bus_number}</td>
+                          <td className="p-3">{formatBusNumber(s.bus_number)}</td>
                           <td className="p-3">{s.stop_name}</td>
                           <td className="p-3">
-                            <span className={`px-2 py-1 rounded-full text-xs font-bold text-white ${isPaid ? 'bg-paid' : 'bg-due'}`}>
-                              {s.fee_status || 'DUE'}
+                            <span className={`px-2 py-1 rounded-full text-xs font-bold text-white ${badgeBgClass}`}>
+                              {feeDetails.label}
                             </span>
                           </td>
                           <td className="p-3 text-primary text-xs font-semibold">Manage</td>
@@ -666,18 +1199,34 @@ const exportTodayCSV = () => {
 
           {activeTab === 'buses' && (
             <div>
-              <p className="text-sm text-slate-500 mb-3">Live locations update every 30 seconds</p>
+              <div className="flex justify-between items-center mb-3">
+                <p className="text-sm text-slate-500">Live locations update every 10 seconds</p>
+                {['admin', 'bus_incharge'].includes(auth.role) && (
+                  <button
+                    onClick={() => setShowAddBus(true)}
+                    className="bg-primary hover:bg-primary/95 text-white px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1"
+                  >
+                    ➕ Add New Bus
+                  </button>
+                )}
+              </div>
               <BusMap buses={buses} className="w-full h-[500px]" />
               <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
                 {buses.map((b) => (
                   <div key={b.bus_number} className="bg-white rounded-lg p-3 shadow text-sm">
                     <div className="flex justify-between items-center">
-                      <p className="font-bold">Bus {b.bus_number}</p>
+                      <p className="font-bold">{formatBusNumber(b.bus_number)}</p>
                       {['admin', 'bus_incharge'].includes(auth.role) && (
                         <button onClick={() => setSelectedBusForEdit(b)} className="text-xs text-primary font-bold">Edit</button>
                       )}
                     </div>
                     <p className="text-slate-500">{b.driver_name}</p>
+                    {b.current_stop && (
+                      <p className="text-[11px] text-emerald-600 font-bold mt-1">Crossed: {b.current_stop}</p>
+                    )}
+                    {b.next_stop && (
+                      <p className="text-[11px] text-blue-600 font-bold mt-0.5">Next: {b.next_stop}</p>
+                    )}
                     <p className="text-xs text-slate-400 mt-1">
                       {b.last_updated ? new Date(b.last_updated).toLocaleString() : 'No location'}
                     </p>
@@ -848,6 +1397,313 @@ const exportTodayCSV = () => {
             </div>
           )}
 
+          {activeTab === 'fuel_odometer' && (
+            <div className="space-y-6 text-left">
+              {/* Bus Cards Row */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {buses.map(bus => {
+                  const bNumber = bus.bus_number;
+                  const bStats = odoStats.stats[bNumber] || {
+                    currentOdometer: 0,
+                    lastRefuelDate: null,
+                    daysSinceLastRefuel: null,
+                    mileage: 0,
+                    totalLogs: 0
+                  };
+
+                  // Check if warning is needed (e.g. no refuels in > 7 days)
+                  const warningOdo = bStats.daysSinceLastRefuel != null && bStats.daysSinceLastRefuel > 7;
+                  
+                  return (
+                    <div key={bNumber} className="bg-white rounded-xl shadow p-5 border-l-4 border-l-primary relative overflow-hidden">
+                      {warningOdo && (
+                        <div className="absolute top-2 right-2 bg-rose-50 text-rose-600 font-bold px-2 py-0.5 rounded text-[10px] animate-pulse">
+                          ⚠️ Needs Fueling
+                        </div>
+                      )}
+                      <h4 className="font-bold text-slate-800 text-lg mb-1">{bNumber}</h4>
+                      <p className="text-xs text-slate-400 mb-4">Route: {bus.route_name || 'N/A'}</p>
+                      
+                      <div className="grid grid-cols-2 gap-x-2 gap-y-3 text-xs">
+                        <div>
+                          <span className="text-slate-400 block mb-0.5">Current Odo</span>
+                          <span className="font-bold text-slate-700 text-sm">{bStats.currentOdometer || 'N/A'} km</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block mb-0.5">Mileage</span>
+                          <span className="font-bold text-slate-700 text-sm">
+                            {bStats.mileage ? `${bStats.mileage} km/L` : 'N/A'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block mb-0.5">Last Refuel</span>
+                          <span className="font-bold text-slate-700 text-sm text-slate-600">{bStats.lastRefuelDate || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block mb-0.5">Days Since Refuel</span>
+                          <span className="font-bold text-slate-700 text-sm text-slate-600">
+                            {bStats.daysSinceLastRefuel != null 
+                              ? `${bStats.daysSinceLastRefuel} days` 
+                              : 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Log History */}
+              <div className="bg-white rounded-xl shadow overflow-hidden">
+                <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                  <h3 className="font-bold text-slate-700">Fuel & Odometer Logs</h3>
+                  <span className="text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-500 rounded">
+                    Last 100 entries
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="text-xs uppercase bg-slate-50 text-slate-400 font-bold border-b">
+                      <tr>
+                        <th className="p-4">Date / Time</th>
+                        <th className="p-4">Bus</th>
+                        <th className="p-4">Logged By</th>
+                        <th className="p-4">Reason</th>
+                        <th className="p-4">Reading</th>
+                        <th className="p-4">Liters Filled</th>
+                        <th className="p-4">Refueled</th>
+                        <th className="p-4 text-center">Photo</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {odoStats.logs.map((log, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/30 text-slate-700">
+                          <td className="p-4 text-xs">
+                            {new Date(log.timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+                          </td>
+                          <td className="p-4 font-semibold">{log.bus_number}</td>
+                          <td className="p-4 text-xs text-slate-500">{log.logged_by}</td>
+                          <td className="p-4">
+                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                              log.reason === 'Fuel' ? 'bg-emerald-50 text-emerald-700' :
+                              log.reason.includes('pickup') ? 'bg-amber-50 text-amber-700' :
+                              log.reason.includes('drop off') ? 'bg-blue-50 text-blue-700' :
+                              'bg-slate-50 text-slate-600'
+                            }`}>
+                              {log.reason}
+                            </span>
+                          </td>
+                          <td className="p-4 font-mono font-semibold">{log.reading} km</td>
+                          <td className="p-4 font-mono">{log.liters != null ? `${log.liters} L` : '-'}</td>
+                          <td className="p-4">
+                            {log.refueled ? (
+                              <span className="text-emerald-600 font-bold">✓</span>
+                            ) : (
+                              <span className="text-slate-300">-</span>
+                            )}
+                          </td>
+                          <td className="p-4 text-center">
+                            {log.photo_url ? (
+                              <a
+                                href={log.photo_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-primary hover:underline text-xs font-semibold flex items-center justify-center gap-1"
+                              >
+                                🖼️ View
+                              </a>
+                            ) : (
+                              <span className="text-slate-300 text-xs">No image</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {!odoStats.logs.length && (
+                        <tr>
+                          <td colSpan={8} className="p-8 text-center text-slate-400">
+                            No odometer or fuel logs have been submitted yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'route_stops' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 text-left">
+              {/* Add Stop Form */}
+              <div className="bg-white rounded-xl shadow p-5 border border-slate-200 h-fit animate-fadeIn">
+                <h3 className="font-bold text-slate-800 text-lg mb-4 flex items-center gap-1.5">
+                  📍 Add Route Stop
+                </h3>
+                <form onSubmit={handleAddStopSubmit} className="space-y-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 block mb-1">Select Bus</label>
+                    <select
+                      required
+                      value={newStop.bus_number}
+                      onChange={(e) => setNewStop({ ...newStop, bus_number: e.target.value })}
+                      className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700 focus:outline-none"
+                    >
+                      <option value="">-- Choose Bus --</option>
+                      {buses.map(b => (
+                        <option key={b.bus_number} value={b.bus_number}>Bus {b.bus_number}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 block mb-1">Stop Name</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Padmavathi Colony"
+                      value={newStop.stop_name}
+                      onChange={(e) => setNewStop({ ...newStop, stop_name: e.target.value })}
+                      className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700 focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Search Location from Maps */}
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                    <span className="text-xs font-bold text-slate-600 block">🔍 Search Location / Address</span>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Search area (e.g. RTC Bus Stand)..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="flex-1 text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleMapSearch}
+                        disabled={searchingMap}
+                        className="bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs px-3 py-1.5 rounded-lg transition"
+                      >
+                        {searchingMap ? 'Searching...' : 'Search'}
+                      </button>
+                    </div>
+
+                    {searchResults.length > 0 && (
+                      <div className="bg-white border border-slate-200 rounded-lg max-h-[150px] overflow-y-auto divide-y text-xs shadow-lg">
+                        {searchResults.map((res, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => handleSelectSearchResult(res)}
+                            className="w-full text-left p-2.5 hover:bg-slate-50 font-medium block truncate text-slate-700"
+                          >
+                            📍 {res.display_name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Current Location Button */}
+                  <div>
+                    <button
+                      type="button"
+                      onClick={handleUseCurrentLocation}
+                      className="w-full bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-800 text-xs font-bold py-2 rounded-xl flex items-center justify-center gap-1.5 transition"
+                    >
+                      📍 Use My Current Location
+                    </button>
+                  </div>
+
+                  {/* Map Coordinates Picker */}
+                  <StopMapPicker
+                    lat={newStop.latitude}
+                    lng={newStop.longitude}
+                    onChange={(lat, lng) => setNewStop(prev => ({ ...prev, latitude: lat, longitude: lng }))}
+                  />
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 block mb-1">Sequence (Order)</label>
+                    <input
+                      type="number"
+                      required
+                      min="1"
+                      placeholder="e.g. 1 (first stop)"
+                      value={newStop.sequence}
+                      onChange={(e) => setNewStop({ ...newStop, sequence: e.target.value })}
+                      className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700 focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={submittingStop}
+                    className="w-full bg-primary hover:bg-primary/95 text-white font-bold py-2.5 rounded-xl text-sm transition flex items-center justify-center gap-1.5"
+                  >
+                    {submittingStop ? <Spinner size="sm" /> : '📍 Save Stop Location'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Stops List */}
+              <div className="lg:col-span-2 space-y-4">
+                {buses.map(bus => {
+                  const busStops = stops
+                    .filter(s => String(s.bus_number) === String(bus.bus_number))
+                    .sort((a, b) => Number(a.sequence) - Number(b.sequence));
+
+                  return (
+                    <div key={bus.bus_number} className="bg-white rounded-xl shadow overflow-hidden border border-slate-100">
+                      <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                        <div>
+                          <h4 className="font-bold text-slate-800">Bus {bus.bus_number} Route Stops</h4>
+                          <span className="text-xs text-slate-400">Route: {bus.route_name || 'N/A'}</span>
+                        </div>
+                        <span className="text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full">
+                          {busStops.length} stops configured
+                        </span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                          <thead className="text-xs uppercase bg-slate-50 text-slate-400 font-bold border-b">
+                            <tr>
+                              <th className="p-4 w-12 text-center">Seq</th>
+                              <th className="p-4">Stop Name</th>
+                              <th className="p-4">Coordinates</th>
+                              <th className="p-4 text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {busStops.map((stop) => (
+                              <tr key={stop.id} className="hover:bg-slate-50/30 text-slate-700">
+                                <td className="p-4 text-center font-bold font-mono bg-slate-50/50 w-12">{stop.sequence}</td>
+                                <td className="p-4 font-semibold text-slate-800">{stop.stop_name}</td>
+                                <td className="p-4 font-mono text-xs text-slate-500">{stop.latitude}, {stop.longitude}</td>
+                                <td className="p-4 text-right">
+                                  <button
+                                    onClick={() => handleDeleteStopClick(stop.id, stop.stop_name)}
+                                    className="text-xs text-red-500 hover:text-red-700 font-bold hover:underline"
+                                  >
+                                    Delete
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                            {!busStops.length && (
+                              <tr>
+                                <td colSpan={4} className="p-6 text-center text-slate-400 text-xs">
+                                  No stops configured for Bus {bus.bus_number} yet.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'manage_credentials' && (
             <div className="bg-white rounded-xl shadow p-6">
               <ManageCredentials auth={auth} />
@@ -872,6 +1728,17 @@ const exportTodayCSV = () => {
           onUpdateFee={() => { setSelectedStudentForFee(selectedStudentForManage); setSelectedStudentForManage(null); }}
           onChangeBus={() => { setSelectedStudentForBus(selectedStudentForManage); setSelectedStudentForManage(null); }}
           onGenerateQR={() => { handleGenerateQR(selectedStudentForManage); setSelectedStudentForManage(null); }}
+          onDeleteStudent={handleDeleteStudent}
+          onDownloadQR={() => handleDownloadQR(selectedStudentForManage)}
+          onAssignQR={() => { setSelectedStudentForQr(selectedStudentForManage); setSelectedStudentForManage(null); }}
+        />
+      )}
+
+      {selectedStudentForQr && (
+        <AssignQrModal
+          student={selectedStudentForQr}
+          onClose={() => setSelectedStudentForQr(null)}
+          onSave={handleAssignQr}
         />
       )}
       
@@ -896,6 +1763,13 @@ const exportTodayCSV = () => {
           bus={selectedBusForEdit}
           onClose={() => setSelectedBusForEdit(null)}
           onSave={handleEditBus}
+        />
+      )}
+
+      {showAddBus && (
+        <AddBusModal
+          onClose={() => setShowAddBus(false)}
+          onSave={handleAddBus}
         />
       )}
     </div>

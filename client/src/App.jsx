@@ -8,61 +8,76 @@ import ParentInstructionSlip from './pages/ParentInstructionSlip';
 import { SCHOOL_NAME } from './utils';
 
 function Home() {
+  const { t } = useLanguage();
   return (
     <div className="min-h-screen bg-gradient-to-b from-primary to-blue-800 flex flex-col items-center justify-center p-6 text-white">
       <img src="/logo.png" alt="College Logo" className="h-24 object-contain mb-6 bg-white/90 p-3 rounded-xl shadow-lg" />
-      <h1 className="text-3xl font-bold text-center mb-2">College Bus Management</h1>
-      <p className="text-blue-100 text-center mb-10">{SCHOOL_NAME} Transport System</p>
+      <h1 className="text-3xl font-bold text-center mb-2">{t('home.title')}</h1>
+      <p className="text-blue-100 text-center mb-10">{SCHOOL_NAME} {t('home.subtitle')}</p>
       <div className="flex flex-col gap-4 w-full max-w-sm">
         <Link
           to="/driver"
           className="bg-white text-primary font-bold py-4 px-6 rounded-xl text-center text-lg shadow-lg hover:bg-blue-50 transition"
         >
-          Driver App
+          {t('home.driverApp')}
         </Link>
         <Link
           to="/admin"
           className="bg-blue-900 text-white font-bold py-4 px-6 rounded-xl text-center text-lg border-2 border-blue-400 hover:bg-blue-950 transition"
         >
-          Admin Dashboard
+          {t('home.adminDashboard')}
         </Link>
         <Link
           to="/reception"
           className="bg-emerald-700 text-white font-bold py-4 px-6 rounded-xl text-center text-lg border-2 border-emerald-400 hover:bg-emerald-800 transition"
         >
-          College Gate Scanner
+          {t('home.gateScanner')}
         </Link>
         <Link
           to="/lookup"
           className="bg-amber-500 text-white font-bold py-4 px-6 rounded-xl text-center text-lg shadow-lg hover:bg-amber-600 transition"
         >
-          Check Your Child's Bus Status
+          {t('home.checkStatus')}
         </Link>
         <p className="text-center text-sm text-blue-100 opacity-90 px-2 -mt-2">
-          Use your child's Student ID and the last 4 digits of your registered phone number to check their status.
+          {t('home.checkStatusInfo')}
         </p>
         <Link
           to="/instruction-slip"
           className="bg-slate-700 text-white font-semibold py-3 px-6 rounded-xl text-center hover:bg-slate-600 transition text-sm"
         >
-          🖨️ Print Parent Instructions
+          {t('home.printInstructions')}
         </Link>
         <Link
           to="/track/1"
           className="bg-transparent text-white font-semibold py-3 px-6 rounded-xl text-center border border-blue-300 hover:bg-blue-700 transition"
         >
-          Parent Tracking (Demo Bus 1)
+          {t('home.demoTracking')}
         </Link>
       </div>
     </div>
   );
 }
 
-import { LanguageProvider } from './contexts/LanguageContext';
+import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
+
+function GlobalLanguageButton() {
+  const { lang, toggleLang } = useLanguage();
+  return (
+    <button
+      onClick={toggleLang}
+      className="fixed bottom-4 right-4 z-50 bg-white/95 hover:bg-white text-slate-800 border border-slate-200 px-4 py-2 rounded-full font-bold shadow-lg hover:shadow-xl transition flex items-center gap-1.5 no-print"
+      style={{ cursor: 'pointer' }}
+    >
+      🌐 {lang === 'en' ? 'తెలుగు' : 'English'}
+    </button>
+  );
+}
 
 export default function App() {
   return (
     <LanguageProvider>
+      <GlobalLanguageButton />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/driver" element={<DriverApp />} />

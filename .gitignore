@@ -5,3 +5,5 @@ output/
 credentials.json
 *.log
 .DS_Store
+serviceAccountKey.json
+server/serviceAccountKey.json

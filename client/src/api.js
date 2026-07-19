@@ -45,14 +45,23 @@ export const api = {
   
   updateBusLocation: (bus_number, lat, lng) =>
     request('/bus/location', { method: 'POST', body: JSON.stringify({ bus_number, lat, lng }) }),
-  startBus: (bus_number, driver_name) =>
-    request('/bus/start', { method: 'POST', body: JSON.stringify({ bus_number, driver_name }) }),
-  startReturnJourney: (bus_number, driver_name) =>
-    request('/bus/start-return', { method: 'POST', body: JSON.stringify({ bus_number, driver_name }) }),
-  stopBus: (bus_number, driver_name) =>
-    request('/bus/stop', { method: 'POST', body: JSON.stringify({ bus_number, driver_name }) }),
-  stopReturnJourney: (bus_number, driver_name) =>
-    request('/bus/stop-return', { method: 'POST', body: JSON.stringify({ bus_number, driver_name }) }),
+  startBus: (bus_number, driver_name, fuel_reading, reason) =>
+    request('/bus/start', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading, reason }) }),
+  startReturnJourney: (bus_number, driver_name, fuel_reading, reason) =>
+    request('/bus/start-return', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading, reason }) }),
+  stopBus: (bus_number, driver_name, fuel_reading) =>
+    request('/bus/stop', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading }) }),
+  stopReturnJourney: (bus_number, driver_name, fuel_reading) =>
+    request('/bus/stop-return', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading }) }),
+  uploadOdometerPhoto: (bus_number, image, driver_name, reason, odometer_reading, refueled, liters) =>
+    request('/bus/odometer-upload', { method: 'POST', body: JSON.stringify({ bus_number, image, driver_name, reason, odometer_reading, refueled, liters }) }),
+  getOdometerStats: (busNumber) => request(`/bus/${busNumber}/odometer-stats`),
+  getAdminOdometerStats: () => request('/admin/odometer-stats'),
+  runOdometerOcr: (image) => request('/bus/odometer-ocr', { method: 'POST', body: JSON.stringify({ image }) }),
+  addBus: (bus, auth) => request('/bus', { method: 'POST', body: JSON.stringify(bus), headers: getAuthHeader(auth) }),
+  getStops: (auth) => request('/stops', { headers: getAuthHeader(auth) }),
+  addStop: (stop, auth) => request('/stops', { method: 'POST', body: JSON.stringify(stop), headers: getAuthHeader(auth) }),
+  deleteStop: (id, auth) => request(`/stops/${id}`, { method: 'DELETE', headers: getAuthHeader(auth) }),
     
   scan: (data) => request('/scan', { method: 'POST', body: JSON.stringify(data) }),
   notify: (data) => request('/notify', { method: 'POST', body: JSON.stringify(data) }),
@@ -69,6 +78,9 @@ export const api = {
     
   lookupStudent: (student_id, last4) =>
     request('/lookup', { method: 'POST', body: JSON.stringify({ student_id, last4 }) }),
+    
+  saveFcmToken: (studentId, fcmToken) =>
+    request(`/students/${studentId}/fcm-token`, { method: 'POST', body: JSON.stringify({ fcmToken }) }),
     
   getReceptionSummary: () => request('/reception/summary'),
   receptionScan: (student_id) => request('/reception/scan', { method: 'POST', body: JSON.stringify({ student_id }) }),
@@ -96,6 +108,20 @@ export const api = {
     method: 'POST',
     headers: getAuthHeader(auth),
     body: JSON.stringify(data)
+  }),
+  updateStudentStatus: (studentId, status, auth) => request(`/students/${studentId}/status`, {
+    method: 'PUT',
+    headers: getAuthHeader(auth),
+    body: JSON.stringify({ status })
+  }),
+  deleteStudent: (studentId, auth) => request(`/students/${studentId}`, {
+    method: 'DELETE',
+    headers: getAuthHeader(auth)
+  }),
+  assignStudentQr: (studentId, newQrId, auth) => request(`/students/${studentId}/assign-qr`, {
+    method: 'POST',
+    headers: getAuthHeader(auth),
+    body: JSON.stringify({ newQrId })
   }),
   updateBusDriver: (number, driver_name, driver_phone, auth) =>
     request(`/bus/${number}/driver`, { method: 'PUT', body: JSON.stringify({ driver_name, driver_phone }), headers: getAuthHeader(auth) }),
