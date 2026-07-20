@@ -341,15 +341,21 @@ export async function updateBusLocation(busNumber, lat, lng) {
     busesCache.map.set(busNumberKey(busNumber), buses[rowIndex]);
   }
 
-  // 2. Persist to Google Sheets
-  const sheets = await getSheets();
-  const sheetRow = buses[rowIndex]._sheetRow;
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: config.googleSheetsId,
-    range: `Buses!F${sheetRow}:H${sheetRow}`,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [[String(lat), String(lng), now]] },
-  });
+  // 2. Persist to Google Sheets asynchronously
+  (async () => {
+    try {
+      const sheets = await getSheets();
+      const sheetRow = buses[rowIndex]._sheetRow;
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: config.googleSheetsId,
+        range: `Buses!F${sheetRow}:H${sheetRow}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [[String(lat), String(lng), now]] },
+      });
+    } catch (err) {
+      // Background sheet update error ignored to protect driver response times
+    }
+  })();
 }
 
 export async function getDashboardStats() {

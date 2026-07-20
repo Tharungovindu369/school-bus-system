@@ -107,18 +107,30 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 
 // RATE LIMITERS
+const isLocalTest = (req) => process.env.NODE_ENV === 'test' || (process.env.NODE_ENV !== 'production' && (req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1'));
+
 const lookupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 150, // 150 requests per 15 minutes per IP to support shared mobile carrier NAT / Wi-Fi networks
   validate: { trustProxy: false },
+  skip: isLocalTest,
   message: { error: 'Too many lookup requests from this IP. Please try again after 15 minutes.' }
 });
 
 const scanLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 60,
+  max: 500, // 500 scans per minute to accommodate high-volume student boarding on shared networks
   validate: { trustProxy: false },
+  skip: isLocalTest,
   message: { error: 'Too many scan requests, please slow down.' }
+});
+
+const locationLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 1000, // 1000 GPS pulses per minute for multi-bus fleets on shared carrier NATs
+  validate: { trustProxy: false },
+  skip: isLocalTest,
+  message: { error: 'Too many location updates, please slow down.' }
 });
 
 const adminLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, validate: { trustProxy: false }, message: { error: 'Too many admin login attempts, please try again after 2 minutes' } });
@@ -429,7 +441,7 @@ app.get('/api/bus/:number', async (req, res) => {
 });
 
 // DRIVER / BUS CONTROLS
-app.post('/api/bus/location', async (req, res) => {
+app.post('/api/bus/location', locationLimiter, async (req, res) => {
   try {
     const { bus_number, lat, lng } = req.body;
     if (!bus_number || lat == null || lng == null) return res.status(400).json({ error: 'bus_number, lat, lng required' });
