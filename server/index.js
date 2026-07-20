@@ -75,8 +75,8 @@ export async function sendPushNotification(fcmToken, title, body) {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
-// Trust reverse proxy (Render / Nginx) for rate limiting & IP detection
-app.set('trust proxy', 1);
+// Trust reverse proxy (Render / Cloudflare / Nginx) for multi-hop X-Forwarded-For headers
+app.set('trust proxy', true);
 
 const server = http.createServer(app);
 // Increase keep-alive timeout above nginx/load-balancer defaults to
@@ -110,20 +110,22 @@ app.use(express.json({ limit: '10mb' }));
 const lookupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30, // 30 requests per 15 minutes per IP to prevent student record enumeration
+  validate: { trustProxy: false },
   message: { error: 'Too many lookup requests from this IP. Please try again after 15 minutes.' }
 });
 
 const scanLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
   max: 60,
+  validate: { trustProxy: false },
   message: { error: 'Too many scan requests, please slow down.' }
 });
 
-const adminLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, message: { error: 'Too many admin login attempts, please try again after 2 minutes' } });
-const accountantLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, message: { error: 'Too many accountant login attempts, please try again after 2 minutes' } });
-const busInchargeLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, message: { error: 'Too many bus-incharge login attempts, please try again after 2 minutes' } });
-const driverLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, message: { error: 'Too many driver login attempts, please try again after 2 minutes' } });
-const receptionLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, message: { error: 'Too many reception login attempts, please try again after 2 minutes' } });
+const adminLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, validate: { trustProxy: false }, message: { error: 'Too many admin login attempts, please try again after 2 minutes' } });
+const accountantLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, validate: { trustProxy: false }, message: { error: 'Too many accountant login attempts, please try again after 2 minutes' } });
+const busInchargeLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, validate: { trustProxy: false }, message: { error: 'Too many bus-incharge login attempts, please try again after 2 minutes' } });
+const driverLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, validate: { trustProxy: false }, message: { error: 'Too many driver login attempts, please try again after 2 minutes' } });
+const receptionLoginLimiter = rateLimit({ windowMs: 2 * 60 * 1000, max: 5, validate: { trustProxy: false }, message: { error: 'Too many reception login attempts, please try again after 2 minutes' } });
 
 
 function todayStr() {
