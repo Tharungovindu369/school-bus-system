@@ -18,12 +18,32 @@ const { getMessaging } = require('firebase-admin/messaging');
 
 let fcmEnabled = false;
 try {
-  const serviceAccount = require('./serviceAccountKey.json');
-  admin.initializeApp({
-    credential: admin.cert(serviceAccount)
-  });
-  fcmEnabled = true;
-  console.log('✅ Firebase Admin SDK initialized successfully');
+  let serviceAccount = null;
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    try {
+      serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    } catch (envErr) {
+      console.error('⚠️ Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON environment variable:', envErr.message);
+    }
+  }
+
+  if (!serviceAccount) {
+    try {
+      serviceAccount = require('./serviceAccountKey.json');
+    } catch (fileErr) {
+      // Local serviceAccountKey.json not present
+    }
+  }
+
+  if (serviceAccount) {
+    admin.initializeApp({
+      credential: admin.cert(serviceAccount)
+    });
+    fcmEnabled = true;
+    console.log('✅ Firebase Admin SDK initialized successfully');
+  } else {
+    console.warn('⚠️ Firebase Admin SDK initialization skipped: No service account credentials found.');
+  }
 } catch (err) {
   console.error('⚠️ Firebase Admin SDK initialization failed:', err.message);
 }
@@ -54,6 +74,10 @@ export async function sendPushNotification(fcmToken, title, body) {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+
+// Trust reverse proxy (Render / Nginx) for rate limiting & IP detection
+app.set('trust proxy', 1);
+
 const server = http.createServer(app);
 // Increase keep-alive timeout above nginx/load-balancer defaults to
 // avoid ECONNRESET when many concurrent requests come in simultaneously.
