@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { api } from '../api';
 import Spinner from '../components/Spinner';
 import BusMap from '../components/BusMap';
+import TripTimeline from '../components/TripTimeline';
 import { getFeeStatusDetails } from '../utils';
 import { getMessagingInstance } from '../firebase';
 import { getToken, onMessage } from 'firebase/messaging';
@@ -15,6 +16,7 @@ export default function ParentLookup() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [bus, setBus] = useState(null);
+  const [timelineEvents, setTimelineEvents] = useState([]);
   const { lang, toggleLang, t } = useLanguage();
 
   useEffect(() => {
@@ -137,20 +139,31 @@ export default function ParentLookup() {
               const busData = await api.getBus(data.student.bus_number);
               setBus(busData);
             }
+            // Re-fetch timeline
+            if (data.student.student_id) {
+              const timelineData = await api.getTodayTimeline(data.student.student_id);
+              if (timelineData.success) {
+                setTimelineEvents(timelineData.events || []);
+              }
+            }
           }
         } catch (err) {
           console.error(err);
         }
       };
-      // Fetch initial bus data since lookupStudent only returned student initially
-      if (!bus && result.bus_number) {
+      
+      // Fetch initial bus & timeline data
+      if (result.bus_number) {
         api.getBus(result.bus_number).then(setBus).catch(console.error);
+      }
+      if (result.student_id) {
+        api.getTodayTimeline(result.student_id).then(res => res.success && setTimelineEvents(res.events || [])).catch(console.error);
       }
       
       interval = setInterval(fetchData, 10000); // Check every 10 seconds for real-time feel
     }
     return () => clearInterval(interval);
-  }, [result?.bus_number, studentId, last4]); // intentionally not including 'bus' or 'result' as whole object to avoid infinite loops
+  }, [result?.student_id, result?.bus_number, studentId, last4]);
 
   const showMap = bus && (bus.current_status === 'morning_running' || bus.current_status === 'return_running');
 
@@ -169,6 +182,9 @@ export default function ParentLookup() {
         setResult(data.student);
         localStorage.setItem('parent_studentId', studentId);
         localStorage.setItem('parent_last4', last4);
+        if (data.student.student_id) {
+          api.getTodayTimeline(data.student.student_id).then(res => res.success && setTimelineEvents(res.events || [])).catch(console.error);
+        }
       }
     } catch (err) {
       if (err.message && err.message.includes('Too many')) {
@@ -186,6 +202,7 @@ export default function ParentLookup() {
   const handleReset = () => {
     setResult(null);
     setBus(null);
+    setTimelineEvents([]);
     setStudentId('');
     setLast4('');
     localStorage.removeItem('parent_studentId');
@@ -352,6 +369,10 @@ export default function ParentLookup() {
                   <BusMap buses={[bus]} highlightBus={bus.bus_number} height={300} className="w-full" />
                 </div>
               )}
+
+              <div className="mb-6">
+                <TripTimeline events={timelineEvents} />
+              </div>
               
               <button
                 onClick={handleReset}

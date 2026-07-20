@@ -542,6 +542,13 @@ app.post('/api/bus/start', async (req, res) => {
     const startTime = nowTimestamp();
     await sheets.updateBusMorningStart(bus_number, startTime);
     await sheets.startJourneyLog(bus_number, req.body.driver_name, fuelVal, reasonVal);
+    sheets.logTripTimelineEvent({
+      student_id: 'ALL',
+      bus_number,
+      event_type: 'trip_started',
+      event_description: `Bus ${bus_number} started morning trip`,
+      location_name: 'Depot'
+    });
     res.json({ success: true, bus_number, startTime, notificationsSent: 0 });
 
     // Asynchronously send push notifications to all parents of students on this bus
@@ -571,6 +578,13 @@ app.post('/api/bus/start-return', async (req, res) => {
     const startTime = nowTimestamp();
     await sheets.updateBusReturnStart(bus_number, startTime);
     await sheets.startJourneyLog(bus_number, req.body.driver_name, fuelVal, reasonVal);
+    sheets.logTripTimelineEvent({
+      student_id: 'ALL',
+      bus_number,
+      event_type: 'trip_started',
+      event_description: `Bus ${bus_number} started return journey`,
+      location_name: 'College'
+    });
     res.json({ success: true, bus_number, startTime, notificationsSent: 0 });
 
     // Asynchronously send push notifications to all parents of students on this bus
@@ -686,6 +700,16 @@ app.post('/api/scan', scanLimiter, async (req, res) => {
       scan_type = 'dropoff';
     }
 
+    const event_type = scan_type === 'dropoff' ? 'student_dropped' : 'student_boarded';
+    const event_description = scan_type === 'dropoff' ? 'Student dropped off' : 'Student boarded bus';
+    sheets.logTripTimelineEvent({
+      student_id: student.student_id,
+      bus_number: record.bus_number,
+      event_type,
+      event_description,
+      location_name: record.stop_name || student.stop_name
+    });
+
     res.json({ success: true, student, record, isCrossBus, scan_type, feeAlert });
 
     // Async Push Notification
@@ -781,6 +805,14 @@ app.post('/api/reception/scan', scanLimiter, async (req, res) => {
     
     attendanceQueue.push(record);
     saveQueueBackup();
+
+    sheets.logTripTimelineEvent({
+      student_id: student.student_id,
+      bus_number: student.bus_number,
+      event_type: 'reached_college',
+      event_description: `${student.name} arrived at college gate`,
+      location_name: 'College Main Gate'
+    });
 
     if (student.bus_number) {
       sheets.updateBusNextStop(student.bus_number, 'School Gate').catch(console.error);
@@ -948,6 +980,18 @@ app.post('/api/lookup', lookupLimiter, async (req, res) => {
 
     res.json({ success: true, student: { ...student, bus_number: actual_bus_number, status, timestamp } });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/students/:id/today-timeline', lookupLimiter, async (req, res) => {
+  try {
+    const cleanId = String(req.params.id || '').trim().toUpperCase();
+    const student = await sheets.getStudentById(cleanId);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    const events = await sheets.getTodayStudentTimeline(student.student_id, student.bus_number);
+    res.json({ success: true, events });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ADMIN ENDPOINTS

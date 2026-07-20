@@ -822,6 +822,17 @@ export async function updateBusStopsState(busNumber, currentStopName, nextStopNa
   const buses = await getBuses();
   const rowIndex = buses.findIndex((b) => busNumberKey(b.bus_number) === busNumberKey(busNumber));
   if (rowIndex === -1) return;
+  
+  if (currentStopName && buses[rowIndex].current_stop !== currentStopName) {
+    logTripTimelineEvent({
+      student_id: 'ALL',
+      bus_number: busNumber,
+      event_type: 'bus_reached_stop',
+      event_description: `Bus reached ${currentStopName}`,
+      location_name: currentStopName
+    });
+  }
+
   const sheets = await getSheets();
   const sheetRow = buses[rowIndex]._sheetRow;
   await sheets.spreadsheets.values.update({
@@ -1338,6 +1349,94 @@ export async function addBus(bus) {
 
   clearCache('Buses!A:P');
   busesCache.timestamp = 0;
+}
+
+let todayTimelineLogs = [];
+let hasEnsuredTimelineHeader = false;
+
+async function ensureTripTimelineHeader() {
+  if (hasEnsuredTimelineHeader) return;
+  try {
+    const sheets = await getSheets();
+    await ensureTabExists(sheets, 'Trip_Timeline_Logs', [
+      'timestamp',
+      'date',
+      'student_id',
+      'bus_number',
+      'event_type',
+      'event_description',
+      'location_name'
+    ]);
+    hasEnsuredTimelineHeader = true;
+  } catch (err) {
+    console.error('Failed to ensure Trip_Timeline_Logs header:', err.message);
+  }
+}
+
+export function logTripTimelineEvent({ student_id = '', bus_number = '', event_type = '', event_description = '', location_name = '' }) {
+  const now = new Date();
+  const timestamp = now.toISOString();
+  const date = getISTDateString();
+
+  const entry = {
+    timestamp,
+    date,
+    student_id: student_id ? String(student_id).trim() : '',
+    bus_number: bus_number ? String(bus_number).trim() : '',
+    event_type,
+    event_description,
+    location_name: location_name || ''
+  };
+
+  todayTimelineLogs.push(entry);
+
+  (async () => {
+    try {
+      const sheets = await getSheets();
+      await ensureTripTimelineHeader();
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: config.googleSheetsId,
+        range: 'Trip_Timeline_Logs!A:G',
+        valueInputOption: 'USER_ENTERED',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: {
+          values: [[timestamp, date, entry.student_id, entry.bus_number, entry.event_type, entry.event_description, entry.location_name]]
+        }
+      });
+    } catch (err) {
+      console.error('[Timeline Log] Sheet append error:', err.message);
+    }
+  })();
+
+  return entry;
+}
+
+export async function getTodayStudentTimeline(studentId, busNumber) {
+  const today = getISTDateString();
+  
+  if (todayTimelineLogs.length === 0) {
+    try {
+      await ensureTripTimelineHeader();
+      const rows = await getSheetData('Trip_Timeline_Logs!A:G');
+      const objects = rowsToObjects(rows);
+      todayTimelineLogs = objects.filter(o => o.date === today);
+    } catch (err) {
+      /* ignore */
+    }
+  }
+
+  const sId = String(studentId || '').trim();
+  const busKey = busNumberKey(busNumber);
+
+  const events = todayTimelineLogs.filter(e => {
+    if (e.date !== today) return false;
+    const matchStudent = e.student_id && String(e.student_id).trim() === sId;
+    const matchBusAll = (!e.student_id || e.student_id === 'ALL' || e.student_id === '') && busNumberKey(e.bus_number) === busKey;
+    return matchStudent || matchBusAll;
+  });
+
+  events.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  return events;
 }
 
 

@@ -42,6 +42,7 @@ export const api = {
   getBuses: (auth) => request('/buses', { headers: getAuthHeader(auth) }),
   getStudentsByBus: (bus, auth) => request(`/buses/${bus}/students`, { headers: getAuthHeader(auth) }),
   getBus: (number) => request(`/bus/${number}`),
+  getTodayTimeline: (studentId) => request(`/students/${studentId}/today-timeline`),
   
   updateBusLocation: (bus_number, lat, lng) =>
     request('/bus/location', { method: 'POST', body: JSON.stringify({ bus_number, lat, lng }) }),
