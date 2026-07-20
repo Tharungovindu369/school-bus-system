@@ -507,21 +507,37 @@ export default function DriverApp() {
     acquireWakeLock();
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    const sendLocation = () => {
-      if (!navigator.geolocation) return;
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          api.updateBusLocation(loggedIn, pos.coords.latitude, pos.coords.longitude).catch(() => {});
-        },
-        () => {},
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
+    let watchId = null;
+
+    const handlePos = (pos) => {
+      if (!pos?.coords) return;
+      const { latitude, longitude } = pos.coords;
+      api.updateBusLocation(loggedIn, latitude, longitude).catch(() => {});
     };
 
-    sendLocation();
-    const interval = setInterval(sendLocation, 10000);
+    if (navigator.geolocation) {
+      // 1. Hardware GPS sensor watch (fires continuously on physical movement)
+      watchId = navigator.geolocation.watchPosition(
+        handlePos,
+        (err) => console.warn('[GPS Watch] Warning:', err.message),
+        { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
+      );
+
+      // 2. Initial position fix
+      navigator.geolocation.getCurrentPosition(handlePos, () => {}, { enableHighAccuracy: true, timeout: 10000 });
+    }
+
+    // 3. Fallback interval every 10 seconds
+    const interval = setInterval(() => {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(handlePos, () => {}, { enableHighAccuracy: true, timeout: 10000 });
+      }
+    }, 10000);
 
     return () => {
+      if (watchId !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchId);
+      }
       clearInterval(interval);
       releaseWakeLock();
       document.removeEventListener('visibilitychange', handleVisibilityChange);

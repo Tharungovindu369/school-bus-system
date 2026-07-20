@@ -328,9 +328,22 @@ export async function updateBusLocation(busNumber, lat, lng) {
   const buses = await getBuses();
   const rowIndex = buses.findIndex((b) => busNumberKey(b.bus_number) === busNumberKey(busNumber));
   if (rowIndex === -1) throw new Error('Bus not found');
+  
+  const now = new Date().toISOString();
+  
+  // 1. Instantly update in-memory cache so subsequent polls get live coordinates immediately
+  buses[rowIndex].latitude = String(lat);
+  buses[rowIndex].longitude = String(lng);
+  buses[rowIndex].current_lat = String(lat);
+  buses[rowIndex].current_lng = String(lng);
+  buses[rowIndex].last_updated = now;
+  if (busesCache.map) {
+    busesCache.map.set(busNumberKey(busNumber), buses[rowIndex]);
+  }
+
+  // 2. Persist to Google Sheets
   const sheets = await getSheets();
   const sheetRow = buses[rowIndex]._sheetRow;
-  const now = new Date().toISOString();
   await sheets.spreadsheets.values.update({
     spreadsheetId: config.googleSheetsId,
     range: `Buses!F${sheetRow}:H${sheetRow}`,

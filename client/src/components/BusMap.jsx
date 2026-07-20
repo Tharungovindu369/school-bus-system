@@ -78,8 +78,8 @@ export default function BusMap({
     layer.clearLayers();
 
     const validBuses = (buses || []).filter((b) => {
-      const lat = parseFloat(b.current_lat);
-      const lng = parseFloat(b.current_lng);
+      const lat = parseFloat(b.latitude || b.current_lat || b.lat);
+      const lng = parseFloat(b.longitude || b.current_lng || b.lng);
       if (isNaN(lat) || isNaN(lng)) return false;
 
       // Only show buses that are actively running and updated within the last 30 minutes
@@ -93,8 +93,8 @@ export default function BusMap({
     const latLngs = [];
 
     validBuses.forEach((bus) => {
-      const lat = parseFloat(bus.current_lat);
-      const lng = parseFloat(bus.current_lng);
+      const lat = parseFloat(bus.latitude || bus.current_lat || bus.lat);
+      const lng = parseFloat(bus.longitude || bus.current_lng || bus.lng);
       const isHighlight = highlightBus && busesMatch(bus.bus_number, highlightBus);
 
       const marker = L.circleMarker([lat, lng], {

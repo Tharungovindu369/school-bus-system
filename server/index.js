@@ -109,7 +109,7 @@ app.use(express.json({ limit: '10mb' }));
 // RATE LIMITERS
 const lookupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30, // 30 requests per 15 minutes per IP to prevent student record enumeration
+  max: 150, // 150 requests per 15 minutes per IP to support shared mobile carrier NAT / Wi-Fi networks
   validate: { trustProxy: false },
   message: { error: 'Too many lookup requests from this IP. Please try again after 15 minutes.' }
 });
