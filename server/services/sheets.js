@@ -1394,6 +1394,8 @@ export function logTripTimelineEvent({ student_id = '', bus_number = '', event_t
     location_name: location_name || ''
   };
 
+  // Purge any stale timeline records from previous days to prevent memory leaks
+  todayTimelineLogs = todayTimelineLogs.filter(e => e.date === date);
   todayTimelineLogs.push(entry);
 
   (async () => {
@@ -1429,6 +1431,9 @@ export async function getTodayStudentTimeline(studentId, busNumber) {
     } catch (err) {
       /* ignore */
     }
+  } else {
+    // Keep memory clean by evicting stale timeline entries
+    todayTimelineLogs = todayTimelineLogs.filter(o => o.date === today);
   }
 
   const sId = String(studentId || '').trim();
