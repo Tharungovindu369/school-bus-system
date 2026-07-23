@@ -128,6 +128,8 @@ export default function ParentLookup() {
   useEffect(() => {
     let interval;
     if (result && studentId && last4) {
+      let isVisible = !document.hidden;
+
       const fetchData = async () => {
         try {
           // Re-fetch student status
@@ -151,6 +153,32 @@ export default function ParentLookup() {
           console.error(err);
         }
       };
+
+      const startPolling = (intervalDuration) => {
+        if (interval) clearInterval(interval);
+        interval = setInterval(fetchData, intervalDuration);
+      };
+
+      // Set initial polling based on current visibility state
+      startPolling(isVisible ? 10000 : 45000);
+
+      const handleVisibilityChange = () => {
+        const nextVisible = !document.hidden;
+        if (nextVisible !== isVisible) {
+          isVisible = nextVisible;
+          console.log(`[ParentLookup] Tab visibility changed: ${isVisible ? 'VISIBLE (10s)' : 'HIDDEN (45s)'}`);
+          if (isVisible) {
+            // Immediately fetch one tick, then resume fast polling (10s)
+            fetchData();
+            startPolling(10000);
+          } else {
+            // Slow down polling to 45s
+            startPolling(45000);
+          }
+        }
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
       
       // Fetch initial bus & timeline data
       if (result.bus_number) {
@@ -160,9 +188,11 @@ export default function ParentLookup() {
         api.getTodayTimeline(result.student_id).then(res => res.success && setTimelineEvents(res.events || [])).catch(console.error);
       }
       
-      interval = setInterval(fetchData, 10000); // Check every 10 seconds for real-time feel
+      return () => {
+        clearInterval(interval);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
     }
-    return () => clearInterval(interval);
   }, [result?.student_id, result?.bus_number, studentId, last4]);
 
   const showMap = bus && (bus.current_status === 'morning_running' || bus.current_status === 'return_running');
