@@ -6,6 +6,37 @@ import { formatBusNumber, busesMatch, FEE_ALERT_MESSAGE, getFeeStatusDetails } f
 import Spinner from '../components/Spinner';
 import { useLanguage } from '../contexts/LanguageContext';
 
+const compressImage = (base64Str, maxWidth = 1024, maxHeight = 1024, quality = 0.7) => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64Str;
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+      if (width > height) {
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+      } else {
+        if (height > maxHeight) {
+          width = Math.round((width * maxHeight) / height);
+          height = maxHeight;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => {
+      resolve(base64Str);
+    };
+  });
+};
+
 function DriverLogin({ onLogin }) {
   const { t } = useLanguage();
   const [busNumber, setBusNumber] = useState('');
@@ -292,7 +323,7 @@ export default function DriverApp() {
     }
   };
 
-  const capturePhoto = () => {
+  const capturePhoto = async () => {
     if (videoRef.current) {
       const canvas = document.createElement('canvas');
       canvas.width = videoRef.current.videoWidth || 640;
@@ -300,10 +331,11 @@ export default function DriverApp() {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL('image/jpeg');
-      setOdoPreview(dataUrl);
-      setOdoBase64(dataUrl);
+      const compressed = await compressImage(dataUrl);
+      setOdoPreview(compressed);
+      setOdoBase64(compressed);
       stopCamera();
-      runOcr(dataUrl);
+      runOcr(compressed);
     }
   };
 
@@ -311,10 +343,11 @@ export default function DriverApp() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onloadend = () => {
-      setOdoPreview(reader.result);
-      setOdoBase64(reader.result);
-      runOcr(reader.result);
+    reader.onloadend = async () => {
+      const compressed = await compressImage(reader.result);
+      setOdoPreview(compressed);
+      setOdoBase64(compressed);
+      runOcr(compressed);
     };
     reader.readAsDataURL(file);
   };
@@ -385,9 +418,9 @@ export default function DriverApp() {
     try {
       const reader = new FileReader();
       reader.onloadend = async () => {
-        const base64Data = reader.result;
+        const compressed = await compressImage(reader.result);
         try {
-          const res = await api.uploadOdometerPhoto(loggedIn, base64Data, driverName);
+          const res = await api.uploadOdometerPhoto(loggedIn, compressed, driverName);
           if (res.success) {
             setFuelInput(res.extractedReading);
             toast.success(`OCR Extracted digits: ${res.extractedReading}`);
