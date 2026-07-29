@@ -352,6 +352,28 @@ export default function DriverApp() {
     reader.readAsDataURL(file);
   };
 
+  const rotateOdometerImage = () => {
+    if (!odoBase64) return;
+    const img = new Image();
+    img.src = odoBase64;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      // Swap width and height for 90 degree rotation
+      canvas.width = img.height;
+      canvas.height = img.width;
+      const ctx = canvas.getContext('2d');
+      // Rotate 90 degrees clockwise
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((90 * Math.PI) / 180);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      
+      const rotated = canvas.toDataURL('image/jpeg', 0.7);
+      setOdoPreview(rotated);
+      setOdoBase64(rotated);
+      runOcr(rotated);
+    };
+  };
+
   const handleOdometerSubmit = async (e) => {
     e.preventDefault();
     if (!odoBase64) {
@@ -1068,6 +1090,13 @@ export default function DriverApp() {
                     {odoPreview && (
                       <div className="mt-3 relative rounded-lg overflow-hidden border border-slate-200 bg-slate-100 max-h-32 flex items-center justify-center">
                         <img src={odoPreview} alt="Odometer Preview" className="max-h-32 object-contain" />
+                        <button
+                          type="button"
+                          onClick={rotateOdometerImage}
+                          className="absolute bottom-1.5 right-1.5 bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded shadow-sm hover:bg-blue-700 active:scale-95 font-bold transition-all"
+                        >
+                          🔄 Rotate
+                        </button>
                         <button
                           type="button"
                           onClick={() => { setOdoPreview(''); setOdoBase64(''); setOdoReading(''); }}
