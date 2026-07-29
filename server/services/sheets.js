@@ -1123,6 +1123,7 @@ export async function runOcrOnImage(base64Image) {
       formData.append('base64Image', base64Image);
       formData.append('language', 'eng');
       formData.append('OcrEngine', '2'); // Optimized for digits/numbers
+      formData.append('detectOrientation', 'true'); // Auto-rotate vertical/sideways dashboard photos
 
       const ocrResponse = await fetch('https://api.ocr.space/parse/image', {
         method: 'POST',
