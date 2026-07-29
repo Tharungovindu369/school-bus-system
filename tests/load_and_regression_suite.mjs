@@ -30,10 +30,12 @@ async function runStep(name, fn) {
   }
 }
 
-async function runRegressionSuite() {
+async function runRegressionSuite(testStudentId, testStudentLast4) {
   console.log('\n==================================================');
   console.log('PART 1: FULL FEATURE REGRESSION TEST PASS');
   console.log('==================================================\n');
+
+  console.log(`Using student for verification: ${testStudentId} (Last 4: ${testStudentLast4})`);
 
   // --- 1. DRIVER APP ---
   console.log('1. DRIVER APP FEATURES:');
@@ -75,11 +77,11 @@ async function runRegressionSuite() {
     const res = await fetchJson(`${BASE_URL}/api/scan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ student_id: 'S0002', bus_number: 'Bus 12', driver_name: 'Driver 12', stop_name: 'Depot Stop' })
+      body: JSON.stringify({ student_id: testStudentId, bus_number: 'Bus 12', driver_name: 'Driver 12', stop_name: 'Depot Stop' })
     });
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.data.success, true);
-    assert.strictEqual(res.data.student.student_id, 'S0002');
+    assert.strictEqual(res.data.student.student_id, testStudentId);
   });
 
   await runStep('End Morning Trip cleanly', async () => {
@@ -98,7 +100,7 @@ async function runRegressionSuite() {
     const res = await fetchJson(`${BASE_URL}/api/reception/scan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ student_id: 'S0002' })
+      body: JSON.stringify({ student_id: testStudentId })
     });
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.data.success, true);
@@ -119,14 +121,14 @@ async function runRegressionSuite() {
     const res = await fetchJson(`${BASE_URL}/api/lookup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ student_id: 'S0002', last4: '6264' })
+      body: JSON.stringify({ student_id: testStudentId, last4: testStudentLast4 })
     });
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.data.student.student_id, 'S0002');
+    assert.strictEqual(res.data.student.student_id, testStudentId);
   });
 
   await runStep('Today Timeline API returns events in chronological order', async () => {
-    const res = await fetchJson(`${BASE_URL}/api/students/S0002/today-timeline`);
+    const res = await fetchJson(`${BASE_URL}/api/students/${testStudentId}/today-timeline`);
     assert.strictEqual(res.status, 200);
     assert.ok(Array.isArray(res.data.events));
     assert.ok(res.data.events.length >= 2);
@@ -137,7 +139,7 @@ async function runRegressionSuite() {
       const res = await fetchJson(`${BASE_URL}/api/lookup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ student_id: 'S0002', last4: '6264' })
+        body: JSON.stringify({ student_id: testStudentId, last4: testStudentLast4 })
       });
       assert.strictEqual(res.status, 200, `Lookup #${i+1} blocked unexpectedly`);
     }
@@ -161,7 +163,7 @@ async function runRegressionSuite() {
   });
 }
 
-async function runLoadSuite() {
+async function runLoadSuite(testStudentId, testStudentLast4) {
   console.log('\n==================================================');
   console.log('PART 2: LOAD & STRESS TESTING (CONCURRENT USAGE)');
   console.log('==================================================\n');
@@ -188,11 +190,11 @@ async function runLoadSuite() {
       fetchJson(`${BASE_URL}/api/lookup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ student_id: 'S0002', last4: '6264' })
+        body: JSON.stringify({ student_id: testStudentId, last4: testStudentLast4 })
       })
     );
     lookupPromises.push(
-      fetchJson(`${BASE_URL}/api/students/S0002/today-timeline`)
+      fetchJson(`${BASE_URL}/api/students/${testStudentId}/today-timeline`)
     );
   }
 
@@ -288,8 +290,16 @@ async function runLoadSuite() {
 
 async function main() {
   try {
-    await runRegressionSuite();
-    const loadMetrics = await runLoadSuite();
+    // Fetch a valid student from the sheet dynamically for regression checks
+    const studentsRes = await fetchJson(`${BASE_URL}/api/students`, {
+      headers: { 'x-admin-password': adminPassword }
+    });
+    const firstStudent = (studentsRes.data || [])[0];
+    const testStudentId = firstStudent ? firstStudent.student_id : 'S0002';
+    const testStudentLast4 = firstStudent ? firstStudent.lookup_phone_last4 : '6264';
+
+    await runRegressionSuite(testStudentId, testStudentLast4);
+    const loadMetrics = await runLoadSuite(testStudentId, testStudentLast4);
 
     console.log('\n==================================================');
     console.log('FINAL PRE-PUSH AUDIT SUMMARY');

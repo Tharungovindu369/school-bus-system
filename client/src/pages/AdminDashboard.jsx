@@ -1101,7 +1101,7 @@ const exportTodayCSV = () => {
           {activeTab === 'students' && (
             <div>
               <div className="flex flex-wrap gap-2 mb-4 items-center w-full">
-                {['admin', 'bus_incharge'].includes(auth?.role || (typeof auth === 'string' ? 'admin' : '')) && (
+                {['admin', 'accountant', 'bus_incharge'].includes(auth?.role || (typeof auth === 'string' ? 'admin' : '')) && (
                   <button onClick={() => setShowAddStudent(true)} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold mr-2">
                     + Add Student
                   </button>

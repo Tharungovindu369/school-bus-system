@@ -1172,7 +1172,7 @@ app.post('/api/reassignments/:bus/end', authBusIncharge, async (req, res) => {
 });
 
 
-app.post('/api/students', authBusIncharge, async (req, res) => {
+app.post('/api/students', authAnyStaff, async (req, res) => {
   try {
     const s = req.body;
     if (!s.student_id || !s.name || !s.bus_number || !s.stop_name) {
