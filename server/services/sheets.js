@@ -1134,21 +1134,48 @@ export async function runOcrOnImage(base64Image) {
     });
 
     const ocrData = await ocrResponse.json();
+    if (ocrData.error) {
+      console.error('[Vision API Error]:', ocrData.error.message);
+      return '0';
+    }
+
     const textAnnotations = ocrData.responses?.[0]?.textAnnotations;
     const fullText = textAnnotations?.[0]?.description || '';
 
     if (fullText) {
       const lines = fullText.split('\n');
+      
+      // 1. Prioritize lines containing km, odo or read
       for (const line of lines) {
-        const match = line.replace(/\s/g, '').match(/\b\d{4,7}\b/);
-        if (match) {
-          extractedReading = match[0];
-          break;
+        const cleanLine = line.toLowerCase().replace(/[\s,]/g, '');
+        if (cleanLine.includes('km') || cleanLine.includes('odo') || cleanLine.includes('read')) {
+          const match = cleanLine.match(/\d{4,7}/);
+          if (match) {
+            extractedReading = match[0];
+            break;
+          }
         }
       }
+
+      // 2. Fallback: Search line-by-line for 4-7 digits
       if (extractedReading === '0') {
-        const generalMatch = fullText.replace(/\s/g, '').match(/\d{4,7}/);
-        if (generalMatch) extractedReading = generalMatch[0];
+        for (const line of lines) {
+          const cleanLine = line.replace(/[\s,]/g, '');
+          const match = cleanLine.match(/\b\d{4,7}\b/);
+          if (match) {
+            extractedReading = match[0];
+            break;
+          }
+        }
+      }
+
+      // 3. Fallback: Scan full text (without spaces/commas) for 4-7 digits
+      if (extractedReading === '0') {
+        const cleanFull = fullText.replace(/[\s,]/g, '');
+        const generalMatch = cleanFull.match(/\d{4,7}/);
+        if (generalMatch) {
+          extractedReading = generalMatch[0];
+        }
       }
     }
   } catch (err) {
