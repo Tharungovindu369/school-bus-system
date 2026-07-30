@@ -58,7 +58,7 @@ export async function getSheetData(range) {
             range,
           });
           const data = response.data.values || [];
-          cache[range] = { timestamp: Date.now(), data };
+          cache[range] = { timestamp: Date.now(), data, lastAccessed: Date.now() };
           return data;
         } finally {
           delete fetchPromises[range];
@@ -67,6 +67,9 @@ export async function getSheetData(range) {
     }
     return fetchPromises[range];
   }
+
+  // Update access time for eviction policy
+  cache[range].lastAccessed = now;
 
   // If we have it but it's expired, trigger background refresh (Stale-While-Revalidate)
   if (now - cache[range].timestamp >= CACHE_TTL_MS) {
@@ -79,7 +82,7 @@ export async function getSheetData(range) {
             range,
           });
           const data = response.data.values || [];
-          cache[range] = { timestamp: Date.now(), data };
+          cache[range] = { timestamp: Date.now(), data, lastAccessed: Date.now() };
           return data;
         } catch (err) {
           console.error(`Background refresh failed for ${range}:`, err.message);
@@ -93,6 +96,19 @@ export async function getSheetData(range) {
   // Return the data instantly (either fresh or stale-while-revalidating)
   return cache[range].data;
 }
+
+// Evict cached sheet ranges that haven't been accessed for more than 5 minutes
+// to keep memory footprint low and prevent leaks on long-running processes.
+setInterval(() => {
+  const now = Date.now();
+  const maxIdleTime = 5 * 60 * 1000; // 5 minutes
+  for (const range in cache) {
+    if (cache[range] && now - cache[range].lastAccessed > maxIdleTime) {
+      delete cache[range];
+      console.log(`[Cache Eviction] Cleared idle sheet range: ${range}`);
+    }
+  }
+}, 60000); // Check every 1 minute
 
 export function appendToCache(range, values) {
   if (cache[range] && cache[range].data) {
