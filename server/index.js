@@ -4,12 +4,28 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import http from 'http';
+import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { config, getDriverPins } from './config.js';
 import * as sheets from './services/sheets.js';
 import { sendWhatsAppNotification } from './services/whatsapp.js';
 import { getAllCredentials, updateCredential, getAdminPassword, getAccountantPin, getBusInchargePin } from './services/credentials.js';
 import * as reassignments from './services/reassignments.js';
+
+/**
+ * Timing-safe string comparison — prevents timing attacks on passwords/PINs.
+ * Returns false if either value is empty/falsy (no info leak about existence).
+ * Pads buffers to equal length before calling timingSafeEqual so it never throws.
+ */
+function timingSafeCompare(a, b) {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(String(a), 'utf8');
+  const bufB = Buffer.from(String(b), 'utf8');
+  const len = Math.max(bufA.length, bufB.length);
+  const padA = Buffer.concat([bufA, Buffer.alloc(len - bufA.length)]);
+  const padB = Buffer.concat([bufB, Buffer.alloc(len - bufB.length)]);
+  return crypto.timingSafeEqual(padA, padB) && bufA.length === bufB.length;
+}
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -86,8 +102,36 @@ server.headersTimeout = 66000;
 
 import helmet from 'helmet';
 
-// Enable Helmet for security headers
-app.use(helmet({ contentSecurityPolicy: false }));
+// Enable Helmet for security headers with CSP tuned for FCM + Leaflet + Google Maps
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: [
+        "'self'",
+        "'unsafe-inline'", // required by React/Vite in dev; tighten if adding nonces in prod
+        'https://unpkg.com',
+        'https://www.gstatic.com',
+      ],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org', 'https://maps.gstatic.com', 'https://*.googleapis.com'],
+      connectSrc: [
+        "'self'",
+        'https://*.googleapis.com',
+        'https://*.firebase.com',
+        'https://*.firebaseio.com',
+        'https://fcmregistrations.googleapis.com',
+        'https://api.ocr.space',
+        'wss://*.firebaseio.com',
+      ],
+      fontSrc: ["'self'", 'data:'],
+      frameSrc: ["'none'"],
+      objectSrc: ["'none'"],
+      workerSrc: ["'self'", 'blob:'],
+    },
+  },
+  crossOriginEmbedderPolicy: false, // disable — breaks Firebase service worker
+}));
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
@@ -256,12 +300,11 @@ warmCache();
 setInterval(warmCache, 8000);
 // ────────────────────────────────────────────────────────────────────────────
 
-
 async function authAdmin(req, res, next) {
   try {
     const pwd = await getAdminPassword();
     const token = req.headers['x-admin-password'] || req.query.token;
-    if (pwd && token === pwd) return next();
+    if (timingSafeCompare(token, pwd)) return next();
     res.status(403).json({ error: 'Forbidden: Admin access required' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
@@ -269,9 +312,9 @@ async function authAdmin(req, res, next) {
 async function authAccountant(req, res, next) {
   try {
     const adminPwd = await getAdminPassword();
-    if (adminPwd && req.headers['x-admin-password'] === adminPwd) return next();
+    if (timingSafeCompare(req.headers['x-admin-password'], adminPwd)) return next();
     const accPin = await getAccountantPin();
-    if (accPin && req.headers['x-accountant-pin'] === accPin) return next();
+    if (timingSafeCompare(req.headers['x-accountant-pin'], accPin)) return next();
     res.status(403).json({ error: 'Forbidden: Accountant access required' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
@@ -279,9 +322,9 @@ async function authAccountant(req, res, next) {
 async function authBusIncharge(req, res, next) {
   try {
     const adminPwd = await getAdminPassword();
-    if (adminPwd && req.headers['x-admin-password'] === adminPwd) return next();
+    if (timingSafeCompare(req.headers['x-admin-password'], adminPwd)) return next();
     const busPin = await getBusInchargePin();
-    if (busPin && req.headers['x-bus-incharge-pin'] === busPin) return next();
+    if (timingSafeCompare(req.headers['x-bus-incharge-pin'], busPin)) return next();
     res.status(403).json({ error: 'Forbidden: Bus Incharge access required' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
@@ -289,11 +332,11 @@ async function authBusIncharge(req, res, next) {
 async function authAnyStaff(req, res, next) {
   try {
     const adminPwd = await getAdminPassword();
-    if (adminPwd && req.headers['x-admin-password'] === adminPwd) return next();
+    if (timingSafeCompare(req.headers['x-admin-password'], adminPwd)) return next();
     const accPin = await getAccountantPin();
-    if (accPin && req.headers['x-accountant-pin'] === accPin) return next();
+    if (timingSafeCompare(req.headers['x-accountant-pin'], accPin)) return next();
     const busPin = await getBusInchargePin();
-    if (busPin && req.headers['x-bus-incharge-pin'] === busPin) return next();
+    if (timingSafeCompare(req.headers['x-bus-incharge-pin'], busPin)) return next();
     res.status(403).json({ error: 'Forbidden: Staff access required' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
@@ -303,8 +346,8 @@ async function authAdminOrAccountant(req, res, next) {
     const adminPwd = await getAdminPassword();
     const accPin = await getAccountantPin();
     const token = req.headers['x-admin-password'] || req.headers['x-accountant-pin'] || req.query.token;
-    if (adminPwd && token === adminPwd) return next();
-    if (accPin && token === accPin) return next();
+    if (timingSafeCompare(token, adminPwd)) return next();
+    if (timingSafeCompare(token, accPin)) return next();
     res.status(403).json({ error: 'Forbidden: Admin or Accountant access required' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
@@ -312,7 +355,7 @@ async function authAdminOrAccountant(req, res, next) {
 async function authDriver(req, res, next) {
     const { busNumber, pin } = req.headers;
     const pins = getDriverPins();
-    if (busNumber && pins[busNumber] === pin) return next();
+    if (busNumber && timingSafeCompare(pins[busNumber], pin)) return next();
     res.status(401).json({ error: 'Unauthorized: Invalid driver credentials' });
 }
 
@@ -342,7 +385,7 @@ app.post('/api/driver/login', driverLoginLimiter, (req, res) => {
   const inputKey = String(busNumber).replace(/^bus\s*/i, '').trim();
   const matchedKey = Object.keys(pins).find(k => String(k).replace(/^bus\s*/i, '').trim() === inputKey);
   
-  if (matchedKey && pins[matchedKey] === String(pin)) {
+  if (matchedKey && timingSafeCompare(pins[matchedKey], String(pin))) {
     return res.json({ success: true, busNumber: matchedKey });
   }
   res.status(401).json({ success: false, message: 'Invalid PIN for this bus' });
@@ -350,28 +393,28 @@ app.post('/api/driver/login', driverLoginLimiter, (req, res) => {
 
 app.post('/api/reception/login', receptionLoginLimiter, (req, res) => {
   const { pin } = req.body;
-  if (pin === config.receptionPin) return res.json({ success: true });
+  if (timingSafeCompare(pin, config.receptionPin)) return res.json({ success: true });
   res.status(401).json({ success: false, message: 'Invalid PIN' });
 });
 
 app.post('/api/admin/login', adminLoginLimiter, async (req, res) => {
   const { password } = req.body;
   const pwd = await getAdminPassword();
-  if (password === pwd) return res.json({ success: true, role: 'admin' });
+  if (timingSafeCompare(password, pwd)) return res.json({ success: true, role: 'admin' });
   res.status(401).json({ success: false, message: 'Invalid password' });
 });
 
 app.post('/api/accountant/login', accountantLoginLimiter, async (req, res) => {
   const { pin } = req.body;
   const accPin = await getAccountantPin();
-  if (pin === accPin) return res.json({ success: true, role: 'accountant' });
+  if (timingSafeCompare(pin, accPin)) return res.json({ success: true, role: 'accountant' });
   res.status(401).json({ success: false, message: 'Invalid PIN' });
 });
 
 app.post('/api/bus-incharge/login', busInchargeLoginLimiter, async (req, res) => {
   const { pin } = req.body;
   const busPin = await getBusInchargePin();
-  if (pin === busPin) return res.json({ success: true, role: 'bus_incharge' });
+  if (timingSafeCompare(pin, busPin)) return res.json({ success: true, role: 'bus_incharge' });
   res.status(401).json({ success: false, message: 'Invalid PIN' });
 });
 

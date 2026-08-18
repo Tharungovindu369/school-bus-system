@@ -2,6 +2,7 @@ node_modules/
 dist/
 output/
 .env
+client/.env
 credentials.json
 *.log
 .DS_Store

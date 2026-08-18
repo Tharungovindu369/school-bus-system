@@ -2,12 +2,12 @@ import { initializeApp } from 'firebase/app';
 import { getMessaging, isSupported } from 'firebase/messaging';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBjHZ4KhSJN7-uH-AXPqNP-5mQUPwL8jTU",
-  authDomain: "prathibha-bus-tracker.firebaseapp.com",
-  projectId: "prathibha-bus-tracker",
-  storageBucket: "prathibha-bus-tracker.firebasestorage.app",
-  messagingSenderId: "522166488802",
-  appId: "1:522166488802:web:fdffbab2f5f8d18a9d18bb"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 const app = initializeApp(firebaseConfig);

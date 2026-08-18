@@ -2,12 +2,12 @@ importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
 firebase.initializeApp({
-  apiKey: "AIzaSyBjHZ4KhSJN7-uH-AXPqNP-5mQUPwL8jTU",
-  authDomain: "prathibha-bus-tracker.firebaseapp.com",
-  projectId: "prathibha-bus-tracker",
-  storageBucket: "prathibha-bus-tracker.firebasestorage.app",
-  messagingSenderId: "522166488802",
-  appId: "1:522166488802:web:fdffbab2f5f8d18a9d18bb"
+  apiKey: "__VITE_FIREBASE_API_KEY__",
+  authDomain: "__VITE_FIREBASE_AUTH_DOMAIN__",
+  projectId: "__VITE_FIREBASE_PROJECT_ID__",
+  storageBucket: "__VITE_FIREBASE_STORAGE_BUCKET__",
+  messagingSenderId: "__VITE_FIREBASE_MESSAGING_SENDER_ID__",
+  appId: "__VITE_FIREBASE_APP_ID__"
 });
 
 const messaging = firebase.messaging();

@@ -80,7 +80,7 @@ export default function ParentLookup() {
         ]);
         const token = await getToken(messaging, {
           serviceWorkerRegistration: registration,
-          vapidKey: 'BHwVBhfWgkEeO4xiEG0gSPtXixhWko3X4wdX72k6ezNEHkELglkQMSxKs9jAAILEBaaYm09C6ofmZsk4Rauf9dY'
+          vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY
         });
         
         if (token) {
