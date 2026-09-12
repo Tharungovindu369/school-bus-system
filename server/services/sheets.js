@@ -35,7 +35,7 @@ export async function getSheets() {
 let studentsCache = { timestamp: 0, map: new Map(), list: [] };
 let busesCache = { timestamp: 0, map: new Map(), list: [] };
 let todayAttendanceCache = { date: '', timestamp: 0, records: [] };
-const CACHE_TTL_MS = 10000;
+const CACHE_TTL_MS = 60000;
 const cache = {};
 
 export function invalidateTodayAttendanceCache() {
@@ -116,6 +116,9 @@ export function appendToCache(range, values) {
   }
   if (range.startsWith('Attendance')) {
     invalidateTodayAttendanceCache();
+    for (const k in cache) {
+      if (k.startsWith('Attendance')) delete cache[k];
+    }
   }
 }
 
@@ -340,12 +343,15 @@ export async function updateStudentFeeStatus(studentId, feeStatus, feeDueDate = 
   studentsCache.timestamp = 0;
 }
 
+const lastLocationSheetWrite = new Map();
+
 export async function updateBusLocation(busNumber, lat, lng) {
   const buses = await getBuses();
   const rowIndex = buses.findIndex((b) => busNumberKey(b.bus_number) === busNumberKey(busNumber));
   if (rowIndex === -1) throw new Error('Bus not found');
   
   const now = new Date().toISOString();
+  const nowMs = Date.now();
   
   // 1. Instantly update in-memory cache so subsequent polls get live coordinates immediately
   buses[rowIndex].latitude = String(lat);
@@ -357,21 +363,27 @@ export async function updateBusLocation(busNumber, lat, lng) {
     busesCache.map.set(busNumberKey(busNumber), buses[rowIndex]);
   }
 
-  // 2. Persist to Google Sheets asynchronously
-  (async () => {
-    try {
-      const sheets = await getSheets();
-      const sheetRow = buses[rowIndex]._sheetRow;
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: config.googleSheetsId,
-        range: `Buses!F${sheetRow}:H${sheetRow}`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [[String(lat), String(lng), now]] },
-      });
-    } catch (err) {
-      // Background sheet update error ignored to protect driver response times
-    }
-  })();
+  // 2. Persist to Google Sheets asynchronously — throttled to at most once per 60 seconds per bus
+  // This prevents 44 buses from exceeding Google Sheets write quota (60 writes/min)
+  const key = busNumberKey(busNumber);
+  const lastWrite = lastLocationSheetWrite.get(key) || 0;
+  if (nowMs - lastWrite >= 60000) {
+    lastLocationSheetWrite.set(key, nowMs);
+    (async () => {
+      try {
+        const sheets = await getSheets();
+        const sheetRow = buses[rowIndex]._sheetRow;
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: config.googleSheetsId,
+          range: `Buses!F${sheetRow}:H${sheetRow}`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: { values: [[String(lat), String(lng), now]] },
+        });
+      } catch (err) {
+        // Background sheet update error ignored to protect driver response times
+      }
+    })();
+  }
 }
 
 export async function getDashboardStats() {
@@ -845,7 +857,13 @@ export async function updateBusStopsState(busNumber, currentStopName, nextStopNa
   const rowIndex = buses.findIndex((b) => busNumberKey(b.bus_number) === busNumberKey(busNumber));
   if (rowIndex === -1) return;
   
-  if (currentStopName && buses[rowIndex].current_stop !== currentStopName) {
+  const currentChanged = currentStopName && buses[rowIndex].current_stop !== currentStopName;
+  const nextChanged = nextStopName && buses[rowIndex].next_stop !== nextStopName;
+
+  // Guard: If neither current nor next stop changed, avoid redundant Sheet writes and cache clears
+  if (!currentChanged && !nextChanged) return;
+
+  if (currentChanged) {
     logTripTimelineEvent({
       student_id: 'ALL',
       bus_number: busNumber,
@@ -855,16 +873,22 @@ export async function updateBusStopsState(busNumber, currentStopName, nextStopNa
     });
   }
 
-  const sheets = await getSheets();
-  const sheetRow = buses[rowIndex]._sheetRow;
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: config.googleSheetsId,
-    range: `Buses!O${sheetRow}:P${sheetRow}`,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [[nextStopName, currentStopName]] }
-  });
-  clearCache('Buses!A:P');
-  busesCache.timestamp = 0;
+  // Update in-memory cache immediately
+  buses[rowIndex].current_stop = currentStopName;
+  buses[rowIndex].next_stop = nextStopName;
+
+  try {
+    const sheets = await getSheets();
+    const sheetRow = buses[rowIndex]._sheetRow;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: config.googleSheetsId,
+      range: `Buses!O${sheetRow}:P${sheetRow}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[nextStopName, currentStopName]] }
+    });
+  } catch (err) {
+    console.error('Failed to update stop state in sheet:', err.message);
+  }
 }
 
 let driveClient = null;

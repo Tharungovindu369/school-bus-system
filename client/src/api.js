@@ -25,6 +25,26 @@ function getAuthHeader(auth) {
   return {};
 }
 
+function getDriverHeader(customBus) {
+  const bus = customBus || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('driver_bus') : null);
+  const pin = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('driver_pin') : null;
+  if (bus && pin) {
+    return {
+      'x-driver-bus': bus,
+      'x-driver-pin': pin,
+    };
+  }
+  return {};
+}
+
+function getReceptionHeader() {
+  const pin = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('reception_pin') : null;
+  if (pin) {
+    return { 'x-reception-pin': pin };
+  }
+  return {};
+}
+
 export const api = {
   health: () => request('/health'),
   getMapsKey: () => request('/config/maps-key'),
@@ -37,7 +57,10 @@ export const api = {
   getStudents: (auth) => request('/students', { headers: getAuthHeader(auth) }),
   getStudent: (id, auth) => request(`/students/${id}`, { headers: getAuthHeader(auth) }),
   getStudentLookup: (id, auth) => request(`/admin/student/${id}`, { headers: getAuthHeader(auth) }),
-  getAttendance: (date, auth) => request(`/attendance${date ? `?date=${date}` : ''}`, { headers: getAuthHeader(auth) }),
+  getAttendance: (date, auth) => {
+    const authHeaders = auth ? getAuthHeader(auth) : getDriverHeader();
+    return request(`/attendance${date ? `?date=${date}` : ''}`, { headers: authHeaders });
+  },
   getIncidents: (auth) => request('/incidents', { headers: getAuthHeader(auth) }),
   getBuses: (auth) => request('/buses', { headers: getAuthHeader(auth) }),
   getStudentsByBus: (bus, auth) => request(`/buses/${bus}/students`, { headers: getAuthHeader(auth) }),
@@ -45,26 +68,26 @@ export const api = {
   getTodayTimeline: (studentId) => request(`/students/${studentId}/today-timeline`),
   
   updateBusLocation: (bus_number, lat, lng) =>
-    request('/bus/location', { method: 'POST', body: JSON.stringify({ bus_number, lat, lng }) }),
+    request('/bus/location', { method: 'POST', body: JSON.stringify({ bus_number, lat, lng }), headers: getDriverHeader(bus_number) }),
   startBus: (bus_number, driver_name, fuel_reading, reason) =>
-    request('/bus/start', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading, reason }) }),
+    request('/bus/start', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading, reason }), headers: getDriverHeader(bus_number) }),
   startReturnJourney: (bus_number, driver_name, fuel_reading, reason) =>
-    request('/bus/start-return', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading, reason }) }),
+    request('/bus/start-return', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading, reason }), headers: getDriverHeader(bus_number) }),
   stopBus: (bus_number, driver_name, fuel_reading) =>
-    request('/bus/stop', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading }) }),
+    request('/bus/stop', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading }), headers: getDriverHeader(bus_number) }),
   stopReturnJourney: (bus_number, driver_name, fuel_reading) =>
-    request('/bus/stop-return', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading }) }),
+    request('/bus/stop-return', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading }), headers: getDriverHeader(bus_number) }),
   uploadOdometerPhoto: (bus_number, image, driver_name, reason, odometer_reading, refueled, liters) =>
-    request('/bus/odometer-upload', { method: 'POST', body: JSON.stringify({ bus_number, image, driver_name, reason, odometer_reading, refueled, liters }) }),
+    request('/bus/odometer-upload', { method: 'POST', body: JSON.stringify({ bus_number, image, driver_name, reason, odometer_reading, refueled, liters }), headers: getDriverHeader(bus_number) }),
   getOdometerStats: (busNumber) => request(`/bus/${busNumber}/odometer-stats`),
   getAdminOdometerStats: () => request('/admin/odometer-stats'),
-  runOdometerOcr: (image) => request('/bus/odometer-ocr', { method: 'POST', body: JSON.stringify({ image }) }),
+  runOdometerOcr: (image) => request('/bus/odometer-ocr', { method: 'POST', body: JSON.stringify({ image }), headers: getDriverHeader() }),
   addBus: (bus, auth) => request('/bus', { method: 'POST', body: JSON.stringify(bus), headers: getAuthHeader(auth) }),
   getStops: (auth) => request('/stops', { headers: getAuthHeader(auth) }),
   addStop: (stop, auth) => request('/stops', { method: 'POST', body: JSON.stringify(stop), headers: getAuthHeader(auth) }),
   deleteStop: (id, auth) => request(`/stops/${id}`, { method: 'DELETE', headers: getAuthHeader(auth) }),
     
-  scan: (data) => request('/scan', { method: 'POST', body: JSON.stringify(data) }),
+  scan: (data) => request('/scan', { method: 'POST', body: JSON.stringify(data), headers: { ...getDriverHeader(data.bus_number), ...getReceptionHeader() } }),
   notify: (data) => request('/notify', { method: 'POST', body: JSON.stringify(data) }),
   
   receptionLogin: (pin) =>
@@ -83,8 +106,8 @@ export const api = {
   saveFcmToken: (studentId, fcmToken) =>
     request(`/students/${studentId}/fcm-token`, { method: 'POST', body: JSON.stringify({ fcmToken }) }),
     
-  getReceptionSummary: () => request('/reception/summary'),
-  receptionScan: (student_id) => request('/reception/scan', { method: 'POST', body: JSON.stringify({ student_id }) }),
+  getReceptionSummary: () => request('/reception/summary', { headers: getReceptionHeader() }),
+  receptionScan: (student_id) => request('/reception/scan', { method: 'POST', body: JSON.stringify({ student_id }), headers: getReceptionHeader() }),
     
   getDashboard: (auth) =>
     request('/admin/dashboard', { headers: getAuthHeader(auth) }),

@@ -76,14 +76,41 @@ async function main() {
     }
   });
 
-  await runTest('List buses', async () => {
+  await runTest('List buses (unauthenticated rejection)', async () => {
     const res = await fetchJson(`${BASE_URL}/api/buses`);
+    if (res.status !== 403) throw new Error(`Expected 403 Forbidden for unauthenticated access, got ${res.status}`);
+  });
+
+  await runTest('List buses (authenticated staff)', async () => {
+    const res = await fetchJson(`${BASE_URL}/api/buses`, {
+      headers: { 'x-admin-password': adminPassword }
+    });
     if (res.status !== 200) throw new Error(`Expected 200, got ${res.status}`);
     if (!Array.isArray(res.data)) throw new Error('Expected array response');
   });
 
-  await runTest('List attendance', async () => {
+  await runTest('List students (unauthenticated rejection)', async () => {
+    const res = await fetchJson(`${BASE_URL}/api/students`);
+    if (res.status !== 403) throw new Error(`Expected 403 Forbidden for unauthenticated access, got ${res.status}`);
+  });
+
+  await runTest('List students (authenticated staff)', async () => {
+    const res = await fetchJson(`${BASE_URL}/api/students`, {
+      headers: { 'x-admin-password': adminPassword }
+    });
+    if (res.status !== 200) throw new Error(`Expected 200, got ${res.status}`);
+    if (!Array.isArray(res.data)) throw new Error('Expected students array');
+  });
+
+  await runTest('List attendance (unauthenticated rejection)', async () => {
     const res = await fetchJson(`${BASE_URL}/api/attendance`);
+    if (res.status !== 401) throw new Error(`Expected 401 Unauthorized for unauthenticated access, got ${res.status}`);
+  });
+
+  await runTest('List attendance (authenticated staff)', async () => {
+    const res = await fetchJson(`${BASE_URL}/api/attendance`, {
+      headers: { 'x-admin-password': adminPassword }
+    });
     if (res.status !== 200) throw new Error(`Expected 200, got ${res.status}`);
     if (!Array.isArray(res.data)) throw new Error('Expected attendance array');
   });

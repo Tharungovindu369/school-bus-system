@@ -248,7 +248,7 @@ async function flushQueues() {
         valueInputOption: 'USER_ENTERED',
         requestBody: { values },
       });
-      sheets.appendToCache('Attendance!A:H', values);
+      sheets.appendToCache('Attendance!A:I', values);
       attendanceQueue.splice(0, batch.length);
     }
     
@@ -278,10 +278,9 @@ async function flushQueues() {
 setInterval(flushQueues, 3000);
 
 // ─── PROACTIVE CACHE WARM-UP ────────────────────────────────────────────────
-// Refresh Students, Buses, and today's Attendance in the background every 8s
-// (just before the 10s TTL expires). This ensures the cache is NEVER empty
-// during active hours, so all real user requests hit the fast warm-cache path
-// (~400-580ms) rather than the cold-cache path (~2500ms).
+// Refresh Students, Buses, and today's Attendance in the background every 30s.
+// This balances fast responses for real users while protecting Google Sheets API
+// quotas from continuous polling exhaustion.
 async function warmCache() {
   try {
     const today = todayStr();
@@ -297,7 +296,7 @@ async function warmCache() {
 
 // Run immediately on startup so the very first real request is also fast.
 warmCache();
-setInterval(warmCache, 8000);
+setInterval(warmCache, 30000);
 // ────────────────────────────────────────────────────────────────────────────
 
 async function authAdmin(req, res, next) {
@@ -352,11 +351,101 @@ async function authAdminOrAccountant(req, res, next) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+function verifyDriverCredentials(req) {
+  const rawBus = req.headers['x-driver-bus'] || req.headers['busnumber'] || req.body?.bus_number || req.query?.bus_number;
+  const rawPin = req.headers['x-driver-pin'] || req.headers['pin'] || req.body?.driver_pin || req.query?.driver_pin;
+  if (!rawBus || !rawPin) return null;
+
+  const pins = getDriverPins();
+  const inputKey = String(rawBus).replace(/^bus\s*/i, '').trim();
+  const matchedKey = Object.keys(pins).find(k => String(k).replace(/^bus\s*/i, '').trim() === inputKey);
+  if (matchedKey && timingSafeCompare(pins[matchedKey], String(rawPin))) {
+    return matchedKey;
+  }
+  return null;
+}
+
 async function authDriver(req, res, next) {
-    const { busNumber, pin } = req.headers;
-    const pins = getDriverPins();
-    if (busNumber && timingSafeCompare(pins[busNumber], pin)) return next();
+  try {
+    const adminPwd = await getAdminPassword();
+    if (timingSafeCompare(req.headers['x-admin-password'], adminPwd)) {
+      req.driverBus = req.headers['x-driver-bus'] || req.body?.bus_number || 'ALL';
+      return next();
+    }
+    const matchedBus = verifyDriverCredentials(req);
+    if (matchedBus) {
+      req.driverBus = matchedBus;
+      return next();
+    }
     res.status(401).json({ error: 'Unauthorized: Invalid driver credentials' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+async function authReception(req, res, next) {
+  try {
+    const adminPwd = await getAdminPassword();
+    if (timingSafeCompare(req.headers['x-admin-password'], adminPwd)) return next();
+    const pin = req.headers['x-reception-pin'] || req.body?.pin;
+    if (timingSafeCompare(pin, config.receptionPin)) return next();
+    res.status(401).json({ error: 'Unauthorized: Invalid reception credentials' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+async function authScan(req, res, next) {
+  try {
+    // 1. Staff check
+    const adminPwd = await getAdminPassword();
+    if (timingSafeCompare(req.headers['x-admin-password'], adminPwd)) return next();
+    const accPin = await getAccountantPin();
+    if (timingSafeCompare(req.headers['x-accountant-pin'], accPin)) return next();
+    const busPin = await getBusInchargePin();
+    if (timingSafeCompare(req.headers['x-bus-incharge-pin'], busPin)) return next();
+
+    // 2. Reception check
+    const recPin = req.headers['x-reception-pin'];
+    if (timingSafeCompare(recPin, config.receptionPin)) return next();
+
+    // 3. Driver check
+    const matchedBus = verifyDriverCredentials(req);
+    if (matchedBus) {
+      req.driverBus = matchedBus;
+      return next();
+    }
+
+    res.status(401).json({ error: 'Unauthorized: Driver or staff credentials required to scan' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+async function authAttendance(req, res, next) {
+  try {
+    const adminPwd = await getAdminPassword();
+    if (timingSafeCompare(req.headers['x-admin-password'], adminPwd)) {
+      req.attendanceScope = 'all';
+      return next();
+    }
+    const accPin = await getAccountantPin();
+    if (timingSafeCompare(req.headers['x-accountant-pin'], accPin)) {
+      req.attendanceScope = 'all';
+      return next();
+    }
+    const busPin = await getBusInchargePin();
+    if (timingSafeCompare(req.headers['x-bus-incharge-pin'], busPin)) {
+      req.attendanceScope = 'all';
+      return next();
+    }
+    const recPin = req.headers['x-reception-pin'];
+    if (timingSafeCompare(recPin, config.receptionPin)) {
+      req.attendanceScope = 'all';
+      return next();
+    }
+    const matchedBus = verifyDriverCredentials(req);
+    if (matchedBus) {
+      req.attendanceScope = 'bus';
+      req.driverBus = matchedBus;
+      return next();
+    }
+    res.status(401).json({ error: 'Unauthorized: Staff or driver credentials required' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
 // HEALTH & PUBLIC ROUTES
@@ -420,19 +509,24 @@ app.post('/api/bus-incharge/login', busInchargeLoginLimiter, async (req, res) =>
 
 app.get('/api/driver/pins', (_req, res) => res.json({ buses: Object.keys(getDriverPins()) }));
 
-// PUBLIC GETTERS
-app.get('/api/students', async (_req, res) => {
+// PROTECTED GETTERS (STAFF / RESTRICTED)
+app.get('/api/students', authAnyStaff, async (_req, res) => {
   try { res.json(await sheets.getStudents()); } 
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/attendance', async (req, res) => {
+app.get('/api/attendance', authAttendance, async (req, res) => {
   try { 
     const dateQuery = req.query.date || todayStr();
-    const records = await sheets.getAttendance(dateQuery); 
+    let records = await sheets.getAttendance(dateQuery); 
     const buses = await sheets.getBuses();
     const { busNumberKey } = await import('./utils.js');
     
+    // Drivers only receive attendance for their own bus
+    if (req.attendanceScope === 'bus' && req.driverBus) {
+      records = records.filter(r => busNumberKey(r.bus_number) === busNumberKey(req.driverBus));
+    }
+
     const enrich = (r) => {
       const bus = buses.find(b => busNumberKey(b.bus_number) === busNumberKey(r.bus_number));
       let scan_type = 'old';
@@ -452,14 +546,18 @@ app.get('/api/attendance', async (req, res) => {
     };
 
     const augmented = records.map(enrich);
-    const queueRecords = attendanceQueue.filter(a => a.date === dateQuery).map(enrich);
+    let queueRecords = attendanceQueue.filter(a => a.date === dateQuery);
+    if (req.attendanceScope === 'bus' && req.driverBus) {
+      queueRecords = queueRecords.filter(a => busNumberKey(a.bus_number) === busNumberKey(req.driverBus));
+    }
+    const augmentedQueue = queueRecords.map(enrich);
     
-    res.json([...augmented, ...queueRecords]);
+    res.json([...augmented, ...augmentedQueue]);
   } 
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/buses', async (_req, res) => {
+app.get('/api/buses', authAnyStaff, async (_req, res) => {
   try { res.json(await sheets.getBuses()); } 
   catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -478,13 +576,30 @@ app.get('/api/bus/:number', async (req, res) => {
       const logs = sheets.rowsToObjects(rows);
       activeJourney = [...logs].reverse().find(log => String(log.bus_number) === String(req.params.number) && (!log.end_time || String(log.end_time).trim() === ''));
     }
+
+    // Mask student PII if caller is not verified staff/driver
+    let isStaffOrDriver = false;
+    try {
+      const adminPwd = await getAdminPassword();
+      if (timingSafeCompare(req.headers['x-admin-password'], adminPwd)) isStaffOrDriver = true;
+      if (verifyDriverCredentials(req)) isStaffOrDriver = true;
+    } catch (_) {}
+
+    const sanitizedBoarded = isStaffOrDriver ? boarded : boarded.map(s => ({
+      timestamp: s.timestamp,
+      boarded_at: s.boarded_at,
+      student_id: '***',
+      student_name: s.student_name ? s.student_name.charAt(0) + '***' : 'Student',
+      stop_name: s.stop_name || 'Stop',
+      bus_number: s.bus_number
+    }));
     
-    res.json({ ...bus, boardedToday: boarded, activeJourney });
+    res.json({ ...bus, boardedToday: sanitizedBoarded, activeJourney });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // DRIVER / BUS CONTROLS
-app.post('/api/bus/location', locationLimiter, async (req, res) => {
+app.post('/api/bus/location', locationLimiter, authDriver, async (req, res) => {
   try {
     const { bus_number, lat, lng } = req.body;
     if (!bus_number || lat == null || lng == null) return res.status(400).json({ error: 'bus_number, lat, lng required' });
@@ -494,7 +609,7 @@ app.post('/api/bus/location', locationLimiter, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/bus/odometer-upload', async (req, res) => {
+app.post('/api/bus/odometer-upload', authDriver, async (req, res) => {
   try {
     const { bus_number, image, driver_name, reason, odometer_reading, refueled, liters } = req.body;
     if (!bus_number || !image) {
@@ -534,7 +649,7 @@ app.get('/api/admin/odometer-stats', authBusIncharge, async (req, res) => {
   }
 });
 
-app.post('/api/bus/odometer-ocr', async (req, res) => {
+app.post('/api/bus/odometer-ocr', authDriver, async (req, res) => {
   try {
     const { image } = req.body;
     if (!image) return res.status(400).json({ error: 'Missing image' });
@@ -587,7 +702,7 @@ app.delete('/api/stops/:id', authBusIncharge, async (req, res) => {
   }
 });
 
-app.post('/api/bus/start', async (req, res) => {
+app.post('/api/bus/start', authDriver, async (req, res) => {
   try {
     const { bus_number, fuel_reading, reason } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
@@ -623,7 +738,7 @@ app.post('/api/bus/start', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/bus/start-return', async (req, res) => {
+app.post('/api/bus/start-return', authDriver, async (req, res) => {
   try {
     const { bus_number, fuel_reading, reason } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
@@ -659,7 +774,7 @@ app.post('/api/bus/start-return', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/bus/stop', async (req, res) => {
+app.post('/api/bus/stop', authDriver, async (req, res) => {
   try {
     const { bus_number, fuel_reading } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
@@ -672,7 +787,7 @@ app.post('/api/bus/stop', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/bus/stop-return', async (req, res) => {
+app.post('/api/bus/stop-return', authDriver, async (req, res) => {
   try {
     const { bus_number, fuel_reading } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
@@ -686,7 +801,7 @@ app.post('/api/bus/stop-return', async (req, res) => {
 });
 
 // SCANNING
-app.post('/api/scan', scanLimiter, async (req, res) => {
+app.post('/api/scan', scanLimiter, authScan, async (req, res) => {
   try {
     const { student_id, driver_name, bus_number, stop_name } = req.body;
     const student = await sheets.getStudentById(student_id.trim().toUpperCase());
@@ -802,7 +917,7 @@ app.post('/api/scan', scanLimiter, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/reception/scan', scanLimiter, async (req, res) => {
+app.post('/api/reception/scan', scanLimiter, authReception, async (req, res) => {
   try {
     const { student_id } = req.body;
     if (!student_id) return res.status(400).json({ error: 'Student ID required' });
@@ -911,7 +1026,7 @@ app.post('/api/reception/scan', scanLimiter, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/reception/summary', async (req, res) => {
+app.get('/api/reception/summary', authReception, async (req, res) => {
   try {
     const students = await sheets.getStudents();
     const todayAttendance = await sheets.getTodayAttendance();
@@ -1133,7 +1248,7 @@ app.get('/api/incidents', authAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/emergency', async (req, res) => {
+app.post('/api/emergency', authDriver, async (req, res) => {
   try {
     const { bus_number, driver_name } = req.body;
     incidentQueue.push({

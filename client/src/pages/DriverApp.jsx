@@ -54,7 +54,7 @@ function DriverLogin({ onLogin }) {
     try {
       const result = await api.driverLogin(pin, busNumber);
       if (result.success) {
-        onLogin(result.busNumber);
+        onLogin(result.busNumber, pin);
         toast.success(`Logged in to ${result.busNumber}`);
       }
     } catch {
@@ -222,7 +222,11 @@ function DropoffResult({ student, onDismiss }) {
 
 export default function DriverApp() {
   const { t } = useLanguage();
-  const [loggedIn, setLoggedIn] = useState(() => sessionStorage.getItem('driver_bus'));
+  const [loggedIn, setLoggedIn] = useState(() => (
+    sessionStorage.getItem('driver_bus') && sessionStorage.getItem('driver_pin')
+      ? sessionStorage.getItem('driver_bus')
+      : null
+  ));
   const [boardedCount, setBoardedCount] = useState(0);
   const [dropoffCount, setDropoffCount] = useState(0);
   const [scanMode, setScanMode] = useState({ scanType: 'boarding', isDropoff: false });
@@ -818,6 +822,7 @@ export default function DriverApp() {
     stopScanner();
     setManualEntry(false);
     sessionStorage.removeItem('driver_bus');
+    sessionStorage.removeItem('driver_pin');
     setLoggedIn(null);
   };
 
@@ -830,9 +835,10 @@ export default function DriverApp() {
   if (!loggedIn) {
     return (
       <DriverLogin
-        onLogin={(bus) => {
+        onLogin={(bus, pin) => {
           const formatted = formatBusNumber(bus);
           sessionStorage.setItem('driver_bus', formatted);
+          sessionStorage.setItem('driver_pin', pin);
           setLoggedIn(formatted);
         }}
       />

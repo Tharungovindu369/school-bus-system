@@ -90,6 +90,7 @@ function ReceptionLogin({ onLogin }) {
     try {
       await api.receptionLogin(pin);
       sessionStorage.setItem('reception_auth', 'true');
+      sessionStorage.setItem('reception_pin', pin);
       toast.success('Logged in successfully');
       onLogin();
     } catch (err) {
@@ -135,7 +136,9 @@ function ReceptionLogin({ onLogin }) {
 
 export default function ReceptionScanner() {
   const { t, lang, toggleLang } = useLanguage();
-  const [loggedIn, setLoggedIn] = useState(() => sessionStorage.getItem('reception_auth') === 'true');
+  const [loggedIn, setLoggedIn] = useState(() => (
+    sessionStorage.getItem('reception_auth') === 'true' && !!sessionStorage.getItem('reception_pin')
+  ));
   const [summary, setSummary] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -323,7 +326,11 @@ export default function ReceptionScanner() {
         </div>
         <div className="flex flex-col items-end gap-2">
           <button
-            onClick={() => { sessionStorage.removeItem('reception_auth'); setLoggedIn(false); }}
+            onClick={() => {
+              sessionStorage.removeItem('reception_auth');
+              sessionStorage.removeItem('reception_pin');
+              setLoggedIn(false);
+            }}
             className="text-sm bg-white/20 px-3 py-1 rounded-lg"
           >
             {t('common.logout')}

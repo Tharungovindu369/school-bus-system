@@ -67,44 +67,55 @@ export default function ParentTrack() {
         />
 
         <div className="mt-4 bg-white rounded-xl shadow p-4">
-          <h2 className="font-bold text-lg mb-3">
-            Boarded Today ({bus.boardedToday?.length || 0})
-          </h2>
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="font-bold text-lg text-slate-800">
+              Students Boarded Today ({bus.boardedToday?.length || 0})
+            </h2>
+            <span className="text-xs bg-green-100 text-green-800 font-semibold px-2 py-0.5 rounded-full">
+              {bus.boardedToday?.length || 0} Boarded
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mb-3">Individual names are masked for student privacy & safety</p>
           {bus.boardedToday?.length ? (
-            <ul className="divide-y">
+            <ul className="divide-y divide-slate-100">
               {bus.boardedToday.map((s, i) => (
-                <li key={i} className="py-3 flex justify-between items-center">
+                <li key={i} className="py-2.5 flex justify-between items-center text-sm">
                   <div>
-                    <p className="font-medium">{s.student_name}</p>
-                    <p className="text-sm text-slate-500">{s.stop_name}</p>
+                    <p className="font-medium text-slate-700">{s.student_name}</p>
+                    <p className="text-xs text-slate-500">{s.stop_name}</p>
                   </div>
-                  <span className="text-sm text-slate-400">{s.boarded_at}</span>
+                  <span className="text-xs font-semibold text-slate-400 bg-slate-50 px-2 py-1 rounded">{s.boarded_at}</span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-slate-400 text-center py-4">No students boarded yet today</p>
+            <p className="text-slate-400 text-center py-4 text-sm">No students boarded yet today</p>
           )}
         </div>
 
         <div className="mt-4 bg-white rounded-xl shadow p-4">
-          <h2 className="font-bold text-lg mb-3">
-            Dropped Off Today ({bus.droppedToday?.length || 0})
-          </h2>
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="font-bold text-lg text-slate-800">
+              Dropped Off Today ({bus.droppedToday?.length || 0})
+            </h2>
+            <span className="text-xs bg-blue-100 text-blue-800 font-semibold px-2 py-0.5 rounded-full">
+              {bus.droppedToday?.length || 0} Dropped
+            </span>
+          </div>
           {bus.droppedToday?.length ? (
-            <ul className="divide-y">
+            <ul className="divide-y divide-slate-100">
               {bus.droppedToday.map((s, i) => (
-                <li key={i} className="py-3 flex justify-between items-center">
+                <li key={i} className="py-2.5 flex justify-between items-center text-sm">
                   <div>
-                    <p className="font-medium">{s.student_name}</p>
-                    <p className="text-sm text-slate-500">{s.stop_name}</p>
+                    <p className="font-medium text-slate-700">{s.student_name}</p>
+                    <p className="text-xs text-slate-500">{s.stop_name}</p>
                   </div>
-                  <span className="text-sm text-slate-400">{s.dropoff_time}</span>
+                  <span className="text-xs font-semibold text-slate-400 bg-slate-50 px-2 py-1 rounded">{s.dropoff_time}</span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-slate-400 text-center py-4">No drop-offs yet today</p>
+            <p className="text-slate-400 text-center py-4 text-sm">No drop-offs yet today</p>
           )}
         </div>
 
