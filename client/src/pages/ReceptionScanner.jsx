@@ -7,6 +7,7 @@ import { formatBusNumber, SCHOOL_NAME, getFeeStatusDetails } from '../utils';
 import Spinner from '../components/Spinner';
 import { useLanguage } from '../contexts/LanguageContext';
 import { getOfflineQueue, enqueueOfflineScan, removeOfflineScan } from '../utils/offlineQueue';
+import { playSuccessFeedback, playWarningFeedback, playErrorFeedback } from '../utils/audioFeedback';
 
 const RECEPTION_QUEUE_KEY = 'schoolbus_reception_offline_scans';
 
@@ -275,10 +276,18 @@ export default function ReceptionScanner() {
 
       const scanResult = await api.receptionScan(cleanId);
       if (scanResult.duplicate) {
+        playWarningFeedback();
         setDuplicateWarning(scanResult.message);
         toast(scanResult.message, { icon: '⚠️', duration: 5000 });
         return;
       }
+
+      if (scanResult.isDue) {
+        playWarningFeedback();
+      } else {
+        playSuccessFeedback();
+      }
+
       setResult(scanResult);
       toast.success('Arrival logged');
       setManualEntry(false);
@@ -302,6 +311,7 @@ export default function ReceptionScanner() {
         /failed to fetch|networkerror|network request failed/i.test(err.message || '');
 
       if (isNetworkIssue) {
+        playSuccessFeedback();
         const count = enqueueOfflineScan({ student_id: cleanId }, RECEPTION_QUEUE_KEY);
         setPendingOfflineCount(count);
         setResult({
@@ -321,6 +331,7 @@ export default function ReceptionScanner() {
           startScanner();
         }, 1500);
       } else {
+        playErrorFeedback();
         toast.error(err.message || 'Scan failed');
       }
     } finally {

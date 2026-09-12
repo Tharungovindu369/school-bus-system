@@ -570,6 +570,7 @@ app.get('/api/buses', authAnyStaff, async (_req, res) => {
 
 // ─── SSE REAL-TIME BUS TRACKING STREAM ──────────────────────────────────────
 const busSseClients = new Map();
+const busAlerts = new Map(); // key -> { alert_type, message, timestamp }
 
 function broadcastBusUpdate(busNumber, busData) {
   const key = String(busNumber).replace(/^bus\s*/i, '').trim();
@@ -615,7 +616,8 @@ app.get('/api/bus/:number/stream', async (req, res) => {
         last_updated: bus.last_updated,
         current_status: bus.current_status,
         current_stop: bus.current_stop,
-        next_stop: bus.next_stop
+        next_stop: bus.next_stop,
+        active_alert: busAlerts.get(key) || null
       })}\n\n`);
     }
   } catch (_) {}
@@ -668,8 +670,39 @@ app.get('/api/bus/:number', async (req, res) => {
       bus_number: s.bus_number
     }));
     
-    res.json({ ...bus, boardedToday: sanitizedBoarded, activeJourney });
+    const key = String(req.params.number).replace(/^bus\s*/i, '').trim();
+    res.json({ ...bus, boardedToday: sanitizedBoarded, activeJourney, active_alert: busAlerts.get(key) || null });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/bus/alert', authDriver, (req, res) => {
+  try {
+    const { bus_number, alert_type, message } = req.body;
+    if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
+    const key = String(bus_number).replace(/^bus\s*/i, '').trim();
+
+    let alertData = null;
+    if (alert_type && alert_type !== 'clear') {
+      alertData = {
+        alert_type,
+        message: message || 'Bus delayed due to traffic/road conditions',
+        timestamp: nowTimestamp()
+      };
+      busAlerts.set(key, alertData);
+    } else {
+      busAlerts.delete(key);
+    }
+
+    // Broadcast in real time to all connected parent screens
+    broadcastBusUpdate(bus_number, {
+      bus_number,
+      active_alert: alertData
+    });
+
+    res.json({ success: true, active_alert: alertData });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // DRIVER / BUS CONTROLS

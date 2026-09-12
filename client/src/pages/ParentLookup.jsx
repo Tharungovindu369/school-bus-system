@@ -376,6 +376,20 @@ export default function ParentLookup() {
                 return null;
               })()}
 
+              {bus?.active_alert?.message && (
+                <div className="mb-6 bg-amber-500 text-white rounded-xl p-4 text-left flex items-start gap-3 shadow-md animate-pulse">
+                  <span className="text-2xl">📢</span>
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-100 block">
+                      Driver Notice / Delay
+                    </span>
+                    <span className="text-sm font-bold text-white block mt-0.5">
+                      {bus.active_alert.message}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {bus && (
                 <div className="mb-6 bg-blue-50 border border-blue-200 rounded-xl p-4 text-left space-y-2.5 animate-fadeIn">
                   <span className="text-xs font-bold text-blue-600 uppercase tracking-wider block">

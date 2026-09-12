@@ -6,6 +6,7 @@ import { formatBusNumber, busesMatch, FEE_ALERT_MESSAGE, getFeeStatusDetails } f
 import Spinner from '../components/Spinner';
 import { useLanguage } from '../contexts/LanguageContext';
 import { getOfflineQueue, enqueueOfflineScan, removeOfflineScan } from '../utils/offlineQueue';
+import { playSuccessFeedback, playWarningFeedback, playErrorFeedback } from '../utils/audioFeedback';
 
 const compressImage = (base64Str, maxWidth = 1024, maxHeight = 1024, quality = 0.7) => {
   return new Promise((resolve) => {
@@ -249,6 +250,9 @@ export default function DriverApp() {
   const [dropoffCount, setDropoffCount] = useState(0);
   const [scanMode, setScanMode] = useState({ scanType: 'boarding', isDropoff: false });
   const [busInfo, setBusInfo] = useState(null);
+  const [activeAlert, setActiveAlert] = useState(null);
+  const [alertModalOpen, setAlertModalOpen] = useState(false);
+  const [postingAlert, setPostingAlert] = useState(false);
   const [startingBus, setStartingBus] = useState(false);
   const [stoppingBus, setStoppingBus] = useState(false);
   const [startingReturn, setStartingReturn] = useState(false);
@@ -581,8 +585,27 @@ export default function DriverApp() {
       const bus = await api.getBus(loggedIn);
       setBusInfo(bus);
       setDriverName(bus.driver_name || 'Driver');
+      setActiveAlert(bus.active_alert || null);
     } catch { /* ignore */ }
   }, [loggedIn]);
+
+  const handleSetAlert = async (type, msg) => {
+    setPostingAlert(true);
+    try {
+      const res = await api.setBusAlert(loggedIn, type, msg);
+      setActiveAlert(res.active_alert || null);
+      if (type === 'clear') {
+        toast.success('Route alert cleared ✅');
+      } else {
+        toast.success('Alert broadcast to waiting parents! 📢');
+      }
+      setAlertModalOpen(false);
+    } catch (err) {
+      toast.error(err.message || 'Failed to broadcast alert');
+    } finally {
+      setPostingAlert(false);
+    }
+  };
 
   const loadScanMode = useCallback(async () => {
     if (!loggedIn) return;
@@ -697,9 +720,16 @@ export default function DriverApp() {
       });
 
       if (scanResult.duplicate) {
+        playWarningFeedback();
         setDuplicateWarning(scanResult.message);
         toast(scanResult.message, { icon: '⚠️', duration: 5000 });
         return;
+      }
+
+      if (scanResult.feeAlert || scanResult.isCrossBus) {
+        playWarningFeedback();
+      } else {
+        playSuccessFeedback();
       }
 
       setResult({
@@ -732,6 +762,7 @@ export default function DriverApp() {
         /failed to fetch|networkerror|network request failed/i.test(err.message || '');
 
       if (isNetworkIssue) {
+        playSuccessFeedback();
         const count = enqueueOfflineScan({
           student_id: cleanId,
           bus_number: loggedIn,
@@ -772,6 +803,7 @@ export default function DriverApp() {
           startScanner();
         }, 1500);
       } else {
+        playErrorFeedback();
         toast.error(err.message || 'Submission failed');
       }
     } finally {
@@ -1048,6 +1080,89 @@ export default function DriverApp() {
                 <span className="font-bold text-slate-800">{busInfo.activeJourney.start_fuel}</span>
               </div>
             </div>
+          </div>
+        )}
+
+        {!scanning && !manualEntry && !result && (
+          <div className="mb-4 bg-white rounded-2xl p-4 shadow border border-slate-200 text-left text-slate-800 animate-fadeIn">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-sm font-bold text-slate-700 flex items-center gap-1.5">
+                  📢 Route & Traffic Alert
+                </h3>
+                {activeAlert ? (
+                  <p className="text-xs text-amber-700 font-bold mt-0.5">
+                    ⚠️ Active: {activeAlert.message}
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Broadcast delay to all waiting parents in 1-tap
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setAlertModalOpen(prev => !prev)}
+                className={`text-xs font-bold px-3 py-1.5 rounded-xl shadow-sm transition ${
+                  activeAlert 
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white animate-pulse' 
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
+              >
+                {activeAlert ? 'Edit Alert ⚠️' : 'Set Alert 📢'}
+              </button>
+            </div>
+
+            {alertModalOpen && (
+              <div className="mt-3 pt-3 border-t border-slate-100 space-y-2 animate-fadeIn">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tap to Broadcast to Parents:</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={postingAlert}
+                    onClick={() => handleSetAlert('traffic', 'Heavy traffic delay (~10-15 mins)')}
+                    className="text-left text-xs bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 p-2.5 rounded-xl font-medium transition"
+                  >
+                    🚦 Heavy Traffic (~15m delay)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={postingAlert}
+                    onClick={() => handleSetAlert('crossing', 'Railway crossing closed (~15 mins)')}
+                    className="text-left text-xs bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 p-2.5 rounded-xl font-medium transition"
+                  >
+                    🚂 Railway Crossing (~15m delay)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={postingAlert}
+                    onClick={() => handleSetAlert('weather', 'Rain / slow moving traffic (~10 mins)')}
+                    className="text-left text-xs bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-900 p-2.5 rounded-xl font-medium transition"
+                  >
+                    🌧️ Rain / Slow Traffic (~10m delay)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={postingAlert}
+                    onClick={() => handleSetAlert('breakdown', 'Minor breakdown / repair stop (~20 mins)')}
+                    className="text-left text-xs bg-red-50 hover:bg-red-100 border border-red-200 text-red-900 p-2.5 rounded-xl font-medium transition"
+                  >
+                    ⚠️ Breakdown / Repair (~20m delay)
+                  </button>
+                </div>
+
+                {activeAlert && (
+                  <button
+                    type="button"
+                    disabled={postingAlert}
+                    onClick={() => handleSetAlert('clear', '')}
+                    className="w-full mt-2 text-xs bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-xl transition"
+                  >
+                    ✅ Clear Alert (Running On Schedule)
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 

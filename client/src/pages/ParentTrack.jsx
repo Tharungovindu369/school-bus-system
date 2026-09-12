@@ -74,6 +74,16 @@ export default function ParentTrack() {
       </div>
 
       <div className="p-4">
+        {bus.active_alert?.message && (
+          <div className="mb-4 bg-amber-500 text-white rounded-2xl p-4 shadow-lg border-2 border-amber-600 flex items-center gap-3 animate-pulse">
+            <span className="text-3xl">📢</span>
+            <div className="flex-1 text-left">
+              <p className="font-bold text-xs uppercase tracking-wider text-amber-100">Live Driver Notice</p>
+              <p className="text-white text-base font-bold mt-0.5">{bus.active_alert.message}</p>
+            </div>
+          </div>
+        )}
+
         <BusMap
           buses={[bus]}
           highlightBus={bus_number}

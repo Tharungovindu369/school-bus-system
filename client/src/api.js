@@ -79,6 +79,8 @@ export const api = {
     request('/bus/stop-return', { method: 'POST', body: JSON.stringify({ bus_number, driver_name, fuel_reading }), headers: getDriverHeader(bus_number) }),
   uploadOdometerPhoto: (bus_number, image, driver_name, reason, odometer_reading, refueled, liters) =>
     request('/bus/odometer-upload', { method: 'POST', body: JSON.stringify({ bus_number, image, driver_name, reason, odometer_reading, refueled, liters }), headers: getDriverHeader(bus_number) }),
+  setBusAlert: (bus_number, alert_type, message) =>
+    request('/bus/alert', { method: 'POST', body: JSON.stringify({ bus_number, alert_type, message }), headers: getDriverHeader(bus_number) }),
   getOdometerStats: (busNumber) => request(`/bus/${busNumber}/odometer-stats`),
   getAdminOdometerStats: () => request('/admin/odometer-stats'),
   runOdometerOcr: (image) => request('/bus/odometer-ocr', { method: 'POST', body: JSON.stringify({ image }), headers: getDriverHeader() }),
