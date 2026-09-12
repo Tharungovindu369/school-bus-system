@@ -57,13 +57,21 @@ export const config = {
 export function getDriverPins() {
   if (process.env.DRIVER_PINS) {
     try {
-      return JSON.parse(process.env.DRIVER_PINS);
+      const parsed = JSON.parse(process.env.DRIVER_PINS);
+      const filtered = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        const num = parseInt(String(k).replace(/^bus\s*/i, ''), 10);
+        if (!isNaN(num) && num >= 1 && num <= 16) {
+          filtered[String(num)] = v;
+        }
+      }
+      return filtered;
     } catch {
       console.warn('Invalid DRIVER_PINS JSON, using defaults');
     }
   }
   const pins = {};
-  for (let i = 1; i <= 18; i++) {
+  for (let i = 1; i <= 16; i++) {
     pins[String(i)] = String(i).padStart(4, '0');
   }
   return pins;

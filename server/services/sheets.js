@@ -273,7 +273,11 @@ export async function getBuses() {
   if (now - busesCache.timestamp < CACHE_TTL_MS) return busesCache.list;
   await ensureBusNextStopHeader();
   const rows = await getSheetData('Buses!A:P');
-  const list = rowsToObjects(rows);
+  const allList = rowsToObjects(rows);
+  const list = allList.filter((b) => {
+    const num = parseInt(busNumberKey(b.bus_number), 10);
+    return !isNaN(num) && num >= 1 && num <= 16;
+  });
   const map = new Map();
   list.forEach(b => map.set(busNumberKey(b.bus_number), b));
   busesCache = { timestamp: now, map, list };

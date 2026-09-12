@@ -60,7 +60,7 @@ function AddBusModal({ onClose, onSave }) {
               value={formData.bus_number}
               onChange={e => setFormData({ ...formData, bus_number: e.target.value })}
               className="w-full border p-2.5 rounded-xl bg-slate-50 focus:outline-none"
-              placeholder="e.g. Bus 17"
+              placeholder="e.g. Bus 16"
               required
             />
           </div>

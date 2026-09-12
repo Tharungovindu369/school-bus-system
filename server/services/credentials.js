@@ -76,7 +76,12 @@ export async function loadCredentials() {
       if (type === 'Accountant' && key === 'accountantPin') creds.accountantPin = value;
       if (type === 'BusIncharge' && key === 'busInchargePin') creds.busInchargePin = value;
       if (type === 'Reception' && key === 'receptionPin') creds.receptionPin = value;
-      if (type === 'Driver') creds.driverPins[key] = value;
+      if (type === 'Driver') {
+        const num = parseInt(String(key).replace(/^bus\s*/i, ''), 10);
+        if (!isNaN(num) && num >= 1 && num <= 16) {
+          creds.driverPins[String(num)] = value;
+        }
+      }
     }
     
     credentialsCache = creds;
@@ -95,7 +100,12 @@ export async function loadCredentials() {
       if (type === 'Accountant' && key === 'accountantPin') creds.accountantPin = value;
       if (type === 'BusIncharge' && key === 'busInchargePin') creds.busInchargePin = value;
       if (type === 'Reception' && key === 'receptionPin') creds.receptionPin = value;
-      if (type === 'Driver') creds.driverPins[key] = value;
+      if (type === 'Driver') {
+        const num = parseInt(String(key).replace(/^bus\s*/i, ''), 10);
+        if (!isNaN(num) && num >= 1 && num <= 16) {
+          creds.driverPins[String(num)] = value;
+        }
+      }
     }
     credentialsCache = creds;
     credentialsCacheTime = Date.now();
@@ -125,7 +135,11 @@ export async function getBusInchargePin() {
 
 export async function getDriverPins() {
   const creds = await loadCredentials();
-  return creds.driverPins;
+  const filtered = {};
+  for (let i = 1; i <= 16; i++) {
+    filtered[String(i)] = creds.driverPins?.[String(i)] || String(i).padStart(4, '0');
+  }
+  return filtered;
 }
 
 export async function updateCredential(type, key, value) {

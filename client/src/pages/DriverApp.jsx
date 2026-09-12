@@ -83,7 +83,7 @@ function DriverLogin({ onLogin }) {
               <option key={b} value={b}>{formatBusNumber(b)}</option>
             ))}
             {buses.length === 0 &&
-              Array.from({ length: 18 }, (_, i) => i + 1).map((n) => (
+              Array.from({ length: 16 }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>{formatBusNumber(n)}</option>
               ))}
           </select>
