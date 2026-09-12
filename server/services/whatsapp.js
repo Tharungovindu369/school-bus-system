@@ -28,6 +28,7 @@ async function sendMessage(phone, message) {
             Authorization: `Bearer ${config.watiApiKey}`,
             'Content-Type': 'application/json',
           },
+          timeout: 5000,
         }
       );
       return { success: true, method: 'wati', message: 'Sent via WATI' };

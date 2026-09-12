@@ -163,17 +163,23 @@ const lookupLimiter = rateLimit({
 
 const scanLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 500, // 500 scans per minute to accommodate high-volume student boarding on shared networks
+  max: 200, // 200 scans per minute per bus / receptionist
   validate: { trustProxy: false },
   skip: isLocalTest,
+  keyGenerator: (req) => {
+    return req.headers['x-driver-bus'] || req.body?.bus_number || req.headers['x-reception-pin'] || req.ip;
+  },
   message: { error: 'Too many scan requests, please slow down.' }
 });
 
 const locationLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 1000, // 1000 GPS pulses per minute for multi-bus fleets on shared carrier NATs
+  max: 120, // 120 GPS pulses per minute per bus (2 updates/sec max)
   validate: { trustProxy: false },
   skip: isLocalTest,
+  keyGenerator: (req) => {
+    return req.headers['x-driver-bus'] || req.body?.bus_number || req.ip;
+  },
   message: { error: 'Too many location updates, please slow down.' }
 });
 
@@ -562,6 +568,74 @@ app.get('/api/buses', authAnyStaff, async (_req, res) => {
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── SSE REAL-TIME BUS TRACKING STREAM ──────────────────────────────────────
+const busSseClients = new Map();
+
+function broadcastBusUpdate(busNumber, busData) {
+  const key = String(busNumber).replace(/^bus\s*/i, '').trim();
+  const clients = busSseClients.get(key);
+  if (clients && clients.size > 0) {
+    const payload = `data: ${JSON.stringify(busData)}\n\n`;
+    for (const res of clients) {
+      try {
+        res.write(payload);
+      } catch (_) {
+        clients.delete(res);
+      }
+    }
+  }
+}
+
+app.get('/api/bus/:number/stream', async (req, res) => {
+  const busNumber = req.params.number;
+  const key = String(busNumber).replace(/^bus\s*/i, '').trim();
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (res.flushHeaders) res.flushHeaders();
+
+  if (!busSseClients.has(key)) {
+    busSseClients.set(key, new Set());
+  }
+  const clients = busSseClients.get(key);
+  clients.add(res);
+
+  // Send initial state immediately
+  try {
+    const bus = await sheets.getBusByNumber(busNumber);
+    if (bus) {
+      res.write(`data: ${JSON.stringify({
+        bus_number: bus.bus_number,
+        latitude: bus.latitude || bus.current_lat,
+        longitude: bus.longitude || bus.current_lng,
+        current_lat: bus.current_lat || bus.latitude,
+        current_lng: bus.current_lng || bus.longitude,
+        last_updated: bus.last_updated,
+        current_status: bus.current_status,
+        current_stop: bus.current_stop,
+        next_stop: bus.next_stop
+      })}\n\n`);
+    }
+  } catch (_) {}
+
+  // Keep-alive heartbeat every 20s
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': heartbeat\n\n');
+    } catch (_) {
+      clearInterval(heartbeat);
+      clients.delete(res);
+    }
+  }, 20000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    clients.delete(res);
+  });
+});
+
 app.get('/api/bus/:number', async (req, res) => {
   try {
     const bus = await sheets.getBusByNumber(req.params.number);
@@ -605,6 +679,17 @@ app.post('/api/bus/location', locationLimiter, authDriver, async (req, res) => {
     if (!bus_number || lat == null || lng == null) return res.status(400).json({ error: 'bus_number, lat, lng required' });
     await sheets.updateBusLocation(bus_number, lat, lng);
     sheets.checkGeofenceNextStop(bus_number, lat, lng).catch(console.error);
+
+    // Real-time broadcast to all watching parents
+    broadcastBusUpdate(bus_number, {
+      bus_number,
+      latitude: String(lat),
+      longitude: String(lng),
+      current_lat: String(lat),
+      current_lng: String(lng),
+      last_updated: nowTimestamp()
+    });
+
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

@@ -5,6 +5,7 @@ import { api, todayStr } from '../api';
 import { formatBusNumber, busesMatch, FEE_ALERT_MESSAGE, getFeeStatusDetails } from '../utils';
 import Spinner from '../components/Spinner';
 import { useLanguage } from '../contexts/LanguageContext';
+import { getOfflineQueue, enqueueOfflineScan, removeOfflineScan } from '../utils/offlineQueue';
 
 const compressImage = (base64Str, maxWidth = 1024, maxHeight = 1024, quality = 0.7) => {
   return new Promise((resolve) => {
@@ -115,7 +116,7 @@ function DriverLogin({ onLogin }) {
   );
 }
 
-function BoardingResult({ student, feeAlert, isCrossBus, actualBus, assignedBus, onDismiss }) {
+function BoardingResult({ student, feeAlert, isCrossBus, actualBus, assignedBus, onDismiss, isOfflineBuffered }) {
   const isDue = feeAlert;
   const isPaid = !isDue;
   const details = getFeeStatusDetails(student);
@@ -140,6 +141,11 @@ function BoardingResult({ student, feeAlert, isCrossBus, actualBus, assignedBus,
             <p><span className="font-semibold">Boarding Today:</span> {actualBus}</p>
             <p><span className="font-semibold">Fee Status:</span> {isDue ? 'DUE' : isExpiringSoon ? 'EXPIRING SOON' : 'PAID'}</p>
           </div>
+          {isOfflineBuffered && (
+            <div className="mt-3 bg-amber-500/30 border border-amber-300/50 rounded-xl p-2.5 text-xs text-center font-medium">
+              📡 Saved in offline memory. Will sync automatically when signal returns.
+            </div>
+          )}
           <button
             onClick={onDismiss}
             className="mt-4 w-full bg-white/20 py-3 rounded-xl font-semibold hover:bg-white/30"
@@ -175,6 +181,11 @@ function BoardingResult({ student, feeAlert, isCrossBus, actualBus, assignedBus,
           </p>
           <p className="text-sm mt-1 text-white/80">Stop: {student.stop_name}</p>
         </div>
+        {isOfflineBuffered && (
+          <div className="mt-3 bg-amber-500/30 border border-amber-300/50 rounded-xl p-2.5 text-xs text-center font-medium">
+            📡 Saved in offline memory. Will sync automatically when signal returns.
+          </div>
+        )}
         <button
           onClick={onDismiss}
           className="mt-4 w-full bg-white/20 py-3 rounded-xl font-semibold hover:bg-white/30"
@@ -196,7 +207,7 @@ function BoardingResult({ student, feeAlert, isCrossBus, actualBus, assignedBus,
   );
 }
 
-function DropoffResult({ student, onDismiss }) {
+function DropoffResult({ student, onDismiss, isOfflineBuffered }) {
   return (
     <div className="rounded-2xl p-6 text-white shadow-xl bg-primary">
       <div className="flex items-center gap-4 mb-4">
@@ -210,6 +221,11 @@ function DropoffResult({ student, onDismiss }) {
         <p className="text-xl font-bold">📍 {student.name} has been dropped off</p>
         <p className="text-sm mt-1 text-blue-100">Stop: {student.stop_name}</p>
       </div>
+      {isOfflineBuffered && (
+        <div className="mt-3 bg-white/20 border border-white/30 rounded-xl p-2.5 text-xs text-center font-medium">
+          📡 Saved in offline memory. Will sync automatically when signal returns.
+        </div>
+      )}
       <button
         onClick={onDismiss}
         className="mt-4 w-full bg-white/20 py-3 rounded-xl font-semibold hover:bg-white/30"
@@ -227,6 +243,8 @@ export default function DriverApp() {
       ? sessionStorage.getItem('driver_bus')
       : null
   ));
+  const [pendingOfflineCount, setPendingOfflineCount] = useState(() => getOfflineQueue().length);
+  const isSyncingRef = useRef(false);
   const [boardedCount, setBoardedCount] = useState(0);
   const [dropoffCount, setDropoffCount] = useState(0);
   const [scanMode, setScanMode] = useState({ scanType: 'boarding', isDropoff: false });
@@ -500,6 +518,63 @@ export default function DriverApp() {
     } catch { /* ignore */ }
   }, [loggedIn]);
 
+  const syncOfflineQueue = useCallback(async () => {
+    if (isSyncingRef.current || !navigator.onLine) return;
+    const queue = getOfflineQueue();
+    if (queue.length === 0) {
+      setPendingOfflineCount(0);
+      return;
+    }
+
+    isSyncingRef.current = true;
+    let syncedCount = 0;
+    try {
+      for (const item of queue) {
+        try {
+          const res = await api.scan({
+            student_id: item.student_id,
+            bus_number: item.bus_number,
+            driver_name: item.driver_name,
+          });
+          if (res.success || res.duplicate) {
+            removeOfflineScan(item.id);
+            syncedCount++;
+            setPendingOfflineCount(getOfflineQueue().length);
+          }
+        } catch (itemErr) {
+          if (!navigator.onLine || /network|failed to fetch/i.test(itemErr.message || '')) {
+            break; // Pause until connectivity returns
+          }
+          if (/not found/i.test(itemErr.message || '')) {
+            removeOfflineScan(item.id);
+            setPendingOfflineCount(getOfflineQueue().length);
+          }
+        }
+      }
+      if (syncedCount > 0) {
+        toast.success(`Synced ${syncedCount} offline scan(s) to server! ✅`);
+        loadCounts().catch(() => {});
+      }
+    } finally {
+      isSyncingRef.current = false;
+      setPendingOfflineCount(getOfflineQueue().length);
+    }
+  }, [loadCounts]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      syncOfflineQueue();
+    };
+    window.addEventListener('online', handleOnline);
+    const interval = setInterval(() => {
+      syncOfflineQueue();
+    }, 8000);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      clearInterval(interval);
+    };
+  }, [syncOfflineQueue]);
+
   const loadBusInfo = useCallback(async () => {
     if (!loggedIn) return;
     try {
@@ -608,9 +683,15 @@ export default function DriverApp() {
     processingRef.current = true;
     setProcessing(true);
     setDuplicateWarning('');
+    const cleanId = studentId.trim();
+
     try {
+      if (!navigator.onLine) {
+        throw new Error('OFFLINE_DETECTED');
+      }
+
       const scanResult = await api.scan({
-        student_id: studentId.trim(),
+        student_id: cleanId,
         bus_number: loggedIn,
         driver_name: driverName,
       });
@@ -646,12 +727,58 @@ export default function DriverApp() {
         }, 1500);
       }
     } catch (err) {
-      toast.error(err.message || 'Submission failed');
+      const isNetworkIssue = !navigator.onLine ||
+        err.message === 'OFFLINE_DETECTED' ||
+        /failed to fetch|networkerror|network request failed/i.test(err.message || '');
+
+      if (isNetworkIssue) {
+        const count = enqueueOfflineScan({
+          student_id: cleanId,
+          bus_number: loggedIn,
+          driver_name: driverName,
+        });
+        setPendingOfflineCount(count);
+
+        const isDropoffMode = scanMode?.isDropoff;
+        if (isDropoffMode) {
+          setDropoffCount(prev => prev + 1);
+        } else {
+          setBoardedCount(prev => prev + 1);
+        }
+
+        setResult({
+          student: {
+            name: `Student ${cleanId}`,
+            student_id: cleanId,
+            class: '-',
+            bus_number: loggedIn,
+            stop_name: 'Buffered Offline (No Cell Signal)',
+          },
+          scanType: isDropoffMode ? 'dropoff' : 'boarding',
+          feeAlert: false,
+          isOfflineBuffered: true,
+          actualBus: loggedIn,
+          assignedBus: loggedIn,
+        });
+        toast.success(`💾 Scan buffered offline (${cleanId})`, { icon: '📡' });
+
+        setManualEntry(false);
+        setStudentIdInput('');
+        stopScanner().catch(() => {});
+
+        setTimeout(() => {
+          setResult(null);
+          setDuplicateWarning('');
+          startScanner();
+        }, 1500);
+      } else {
+        toast.error(err.message || 'Submission failed');
+      }
     } finally {
       processingRef.current = false;
       setProcessing(false);
     }
-  }, [loggedIn, driverName, loadCounts, stopScanner]);
+  }, [loggedIn, driverName, scanMode, loadCounts, stopScanner]);
 
   useEffect(() => {
     if (!loggedIn || scannerType !== 'bluetooth' || result || scanning || manualEntry) return;
@@ -868,12 +995,35 @@ export default function DriverApp() {
             <h1 className="text-xl font-bold">{formatBusNumber(loggedIn)}</h1>
             <p className="text-blue-100 text-sm">{driverName}</p>
           </div>
-          <button onClick={handleLogout} className="text-sm bg-white/20 px-3 py-1 rounded-lg">
-            {t('driver.logout') || 'Logout'}
-          </button>
+          <div className="flex items-center gap-2">
+            {pendingOfflineCount > 0 && (
+              <button
+                onClick={syncOfflineQueue}
+                className="text-xs bg-amber-500 hover:bg-amber-600 font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow animate-pulse"
+                title="Pending offline scans awaiting server sync"
+              >
+                💾 {pendingOfflineCount} Queued
+              </button>
+            )}
+            <button onClick={handleLogout} className="text-sm bg-white/20 px-3 py-1 rounded-lg">
+              {t('driver.logout') || 'Logout'}
+            </button>
+          </div>
         </div>
         <p className="text-blue-100 text-xs mt-1">{today}</p>
       </div>
+
+      {pendingOfflineCount > 0 && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-xs text-amber-900 flex justify-between items-center font-medium">
+          <span>📡 <strong>{pendingOfflineCount}</strong> scan(s) saved in offline memory. Auto-syncing when signal returns...</span>
+          <button
+            onClick={syncOfflineQueue}
+            className="text-amber-950 font-bold underline ml-2 bg-amber-200 hover:bg-amber-300 px-2 py-0.5 rounded shadow-sm"
+          >
+            Sync Now
+          </button>
+        </div>
+      )}
 
       <div className="flex text-white text-center font-bold text-sm">
         <div className="flex-1 bg-paid py-3">{t('driver.boardedCount')} {boardedCount}</div>
@@ -1196,7 +1346,11 @@ export default function DriverApp() {
 
         {result && !scanning && !manualEntry && (
           result.scanType === 'dropoff' ? (
-            <DropoffResult student={result.student} onDismiss={dismissResult} />
+            <DropoffResult
+              student={result.student}
+              onDismiss={dismissResult}
+              isOfflineBuffered={result.isOfflineBuffered}
+            />
           ) : (
             <BoardingResult
               student={result.student}
@@ -1205,6 +1359,7 @@ export default function DriverApp() {
               actualBus={result.actualBus}
               assignedBus={result.assignedBus}
               onDismiss={dismissResult}
+              isOfflineBuffered={result.isOfflineBuffered}
             />
           )
         )}

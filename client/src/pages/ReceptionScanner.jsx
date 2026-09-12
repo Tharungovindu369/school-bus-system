@@ -6,6 +6,9 @@ import { api } from '../api';
 import { formatBusNumber, SCHOOL_NAME, getFeeStatusDetails } from '../utils';
 import Spinner from '../components/Spinner';
 import { useLanguage } from '../contexts/LanguageContext';
+import { getOfflineQueue, enqueueOfflineScan, removeOfflineScan } from '../utils/offlineQueue';
+
+const RECEPTION_QUEUE_KEY = 'schoolbus_reception_offline_scans';
 
 function ArrivalResult({ result, onDismiss }) {
   const { t } = useLanguage();
@@ -66,6 +69,11 @@ function ArrivalResult({ result, onDismiss }) {
         <div className="bg-white/20 rounded-xl p-4 text-center">
           <p className="text-xl font-bold">{result.message}</p>
         </div>
+        {result.isOfflineBuffered && (
+          <div className="mt-3 bg-white/20 border border-white/30 rounded-xl p-2.5 text-xs text-center font-medium">
+            📡 Saved in offline memory (Wi-Fi issue). Will sync automatically when connection returns.
+          </div>
+        )}
         <button onClick={onDismiss} className="mt-4 w-full bg-white/20 py-3 rounded-xl font-semibold">
           {t('reception.scanNext')}
         </button>
@@ -139,6 +147,8 @@ export default function ReceptionScanner() {
   const [loggedIn, setLoggedIn] = useState(() => (
     sessionStorage.getItem('reception_auth') === 'true' && !!sessionStorage.getItem('reception_pin')
   ));
+  const [pendingOfflineCount, setPendingOfflineCount] = useState(() => getOfflineQueue(RECEPTION_QUEUE_KEY).length);
+  const isSyncingRef = useRef(false);
   const [summary, setSummary] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -180,6 +190,59 @@ export default function ReceptionScanner() {
     } catch { /* ignore */ }
   }, []);
 
+  const syncOfflineQueue = useCallback(async () => {
+    if (isSyncingRef.current || !navigator.onLine) return;
+    const queue = getOfflineQueue(RECEPTION_QUEUE_KEY);
+    if (queue.length === 0) {
+      setPendingOfflineCount(0);
+      return;
+    }
+
+    isSyncingRef.current = true;
+    let syncedCount = 0;
+    try {
+      for (const item of queue) {
+        try {
+          const res = await api.receptionScan(item.student_id);
+          if (res.success || res.duplicate) {
+            removeOfflineScan(item.id, RECEPTION_QUEUE_KEY);
+            syncedCount++;
+            setPendingOfflineCount(getOfflineQueue(RECEPTION_QUEUE_KEY).length);
+          }
+        } catch (itemErr) {
+          if (!navigator.onLine || /network|failed to fetch/i.test(itemErr.message || '')) {
+            break;
+          }
+          if (/not found/i.test(itemErr.message || '')) {
+            removeOfflineScan(item.id, RECEPTION_QUEUE_KEY);
+            setPendingOfflineCount(getOfflineQueue(RECEPTION_QUEUE_KEY).length);
+          }
+        }
+      }
+      if (syncedCount > 0) {
+        toast.success(`Synced ${syncedCount} gate scan(s) to server! ✅`);
+        loadSummary().catch(() => {});
+      }
+    } finally {
+      isSyncingRef.current = false;
+      setPendingOfflineCount(getOfflineQueue(RECEPTION_QUEUE_KEY).length);
+    }
+  }, [loadSummary]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      syncOfflineQueue();
+    };
+    window.addEventListener('online', handleOnline);
+    const interval = setInterval(() => {
+      syncOfflineQueue();
+    }, 8000);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      clearInterval(interval);
+    };
+  }, [syncOfflineQueue]);
+
   useEffect(() => {
     if (!loggedIn) return;
     loadSummary();
@@ -203,8 +266,14 @@ export default function ReceptionScanner() {
     processingRef.current = true;
     setProcessing(true);
     setDuplicateWarning('');
+    const cleanId = studentId.trim();
+
     try {
-      const scanResult = await api.receptionScan(studentId.trim());
+      if (!navigator.onLine) {
+        throw new Error('OFFLINE_DETECTED');
+      }
+
+      const scanResult = await api.receptionScan(cleanId);
       if (scanResult.duplicate) {
         setDuplicateWarning(scanResult.message);
         toast(scanResult.message, { icon: '⚠️', duration: 5000 });
@@ -228,7 +297,32 @@ export default function ReceptionScanner() {
         }, 1500);
       }
     } catch (err) {
-      toast.error(err.message || 'Scan failed');
+      const isNetworkIssue = !navigator.onLine ||
+        err.message === 'OFFLINE_DETECTED' ||
+        /failed to fetch|networkerror|network request failed/i.test(err.message || '');
+
+      if (isNetworkIssue) {
+        const count = enqueueOfflineScan({ student_id: cleanId }, RECEPTION_QUEUE_KEY);
+        setPendingOfflineCount(count);
+        setResult({
+          student: { name: `Student ${cleanId}`, student_id: cleanId, class: '-' },
+          message: 'Arrival buffered offline (Wi-Fi issue) 📡',
+          isDue: false,
+          isOfflineBuffered: true
+        });
+        toast.success(`💾 Gate scan buffered offline (${cleanId})`, { icon: '📡' });
+        setManualEntry(false);
+        setStudentIdInput('');
+        stopScanner().catch(() => {});
+
+        setTimeout(() => {
+          setResult(null);
+          setDuplicateWarning('');
+          startScanner();
+        }, 1500);
+      } else {
+        toast.error(err.message || 'Scan failed');
+      }
     } finally {
       processingRef.current = false;
       setProcessing(false);
@@ -324,7 +418,16 @@ export default function ReceptionScanner() {
           <h1 className="text-2xl font-bold">{t('reception.loginTitle')}</h1>
           <p className="text-blue-100 text-sm">Reception | {SCHOOL_NAME}</p>
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex items-center gap-2">
+          {pendingOfflineCount > 0 && (
+            <button
+              onClick={syncOfflineQueue}
+              className="text-xs bg-amber-500 hover:bg-amber-600 font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow animate-pulse"
+              title="Pending offline gate scans awaiting network sync"
+            >
+              💾 {pendingOfflineCount} Queued
+            </button>
+          )}
           <button
             onClick={() => {
               sessionStorage.removeItem('reception_auth');
@@ -337,6 +440,18 @@ export default function ReceptionScanner() {
           </button>
         </div>
       </div>
+
+      {pendingOfflineCount > 0 && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-xs text-amber-900 flex justify-between items-center font-medium max-w-2xl mx-auto">
+          <span>📡 <strong>{pendingOfflineCount}</strong> gate scan(s) saved in offline memory. Auto-syncing when Wi-Fi connects...</span>
+          <button
+            onClick={syncOfflineQueue}
+            className="text-amber-950 font-bold underline ml-2 bg-amber-200 hover:bg-amber-300 px-2 py-0.5 rounded shadow-sm"
+          >
+            Sync Now
+          </button>
+        </div>
+      )}
 
       {summary && (
         <div className="p-4 bg-white border-b grid grid-cols-2 gap-3 max-w-2xl mx-auto">

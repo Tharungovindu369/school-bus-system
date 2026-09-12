@@ -127,8 +127,22 @@ export default function ParentLookup() {
 
   useEffect(() => {
     let interval;
+    let eventSource = null;
+
     if (result && studentId && last4) {
       let isVisible = !document.hidden;
+
+      if (result.bus_number) {
+        try {
+          eventSource = new EventSource(`/api/bus/${encodeURIComponent(result.bus_number)}/stream`);
+          eventSource.onmessage = (event) => {
+            try {
+              const update = JSON.parse(event.data);
+              setBus((prev) => (prev ? { ...prev, ...update } : update));
+            } catch (_) {}
+          };
+        } catch (_) {}
+      }
 
       const fetchData = async () => {
         try {
@@ -136,8 +150,8 @@ export default function ParentLookup() {
           const data = await api.lookupStudent(studentId, last4);
           if (data.success) {
             setResult(data.student);
-            // Re-fetch bus
-            if (data.student.bus_number) {
+            // Re-fetch bus if needed
+            if (data.student.bus_number && !eventSource) {
               const busData = await api.getBus(data.student.bus_number);
               setBus(busData);
             }
@@ -159,21 +173,18 @@ export default function ParentLookup() {
         interval = setInterval(fetchData, intervalDuration);
       };
 
-      // Set initial polling based on current visibility state
-      startPolling(isVisible ? 10000 : 45000);
+      // Real-time bus coords handled via SSE; polling relaxed to 25s (visible) / 60s (hidden)
+      startPolling(isVisible ? 25000 : 60000);
 
       const handleVisibilityChange = () => {
         const nextVisible = !document.hidden;
         if (nextVisible !== isVisible) {
           isVisible = nextVisible;
-          console.log(`[ParentLookup] Tab visibility changed: ${isVisible ? 'VISIBLE (10s)' : 'HIDDEN (45s)'}`);
           if (isVisible) {
-            // Immediately fetch one tick, then resume fast polling (10s)
             fetchData();
-            startPolling(10000);
+            startPolling(25000);
           } else {
-            // Slow down polling to 45s
-            startPolling(45000);
+            startPolling(60000);
           }
         }
       };
@@ -190,6 +201,7 @@ export default function ParentLookup() {
       
       return () => {
         clearInterval(interval);
+        if (eventSource) eventSource.close();
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
     }
