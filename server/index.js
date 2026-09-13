@@ -102,7 +102,7 @@ server.headersTimeout = 66000;
 
 import helmet from 'helmet';
 
-// Enable Helmet for security headers with CSP tuned for FCM + Leaflet + Google Maps
+// Enable Helmet for security headers with CSP tuned for FCM + Leaflet + Google Maps + CartoDB
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -110,13 +110,33 @@ app.use(helmet({
       scriptSrc: [
         "'self'",
         "'unsafe-inline'", // required by React/Vite in dev; tighten if adding nonces in prod
+        'https://cdnjs.cloudflare.com',
         'https://unpkg.com',
         'https://www.gstatic.com',
       ],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
-      imgSrc: ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org', 'https://maps.gstatic.com', 'https://*.googleapis.com'],
+      styleSrc: [
+        "'self'",
+        "'unsafe-inline'",
+        'https://cdnjs.cloudflare.com',
+        'https://unpkg.com',
+      ],
+      imgSrc: [
+        "'self'",
+        'data:',
+        'blob:',
+        'https://*.basemaps.cartocdn.com',
+        'https://basemaps.cartocdn.com',
+        'https://*.tile.openstreetmap.org',
+        'https://tile.openstreetmap.org',
+        'https://cdnjs.cloudflare.com',
+        'https://maps.gstatic.com',
+        'https://*.googleapis.com',
+      ],
       connectSrc: [
         "'self'",
+        'https://*.basemaps.cartocdn.com',
+        'https://basemaps.cartocdn.com',
+        'https://*.tile.openstreetmap.org',
         'https://*.googleapis.com',
         'https://*.firebase.com',
         'https://*.firebaseio.com',
@@ -124,12 +144,13 @@ app.use(helmet({
         'https://api.ocr.space',
         'wss://*.firebaseio.com',
       ],
-      fontSrc: ["'self'", 'data:'],
+      fontSrc: ["'self'", 'data:', 'https://cdnjs.cloudflare.com'],
       frameSrc: ["'none'"],
       objectSrc: ["'none'"],
       workerSrc: ["'self'", 'blob:'],
     },
   },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   crossOriginEmbedderPolicy: false, // disable — breaks Firebase service worker
 }));
 

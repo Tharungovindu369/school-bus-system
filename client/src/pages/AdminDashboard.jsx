@@ -150,13 +150,11 @@ function StopMapPicker({ lat, lng, onChange }) {
     }).setView([initialLat, initialLng], 13);
     mapInstance.current = map;
 
-    // Fast CartoDB Voyager tiles with OSM fallback
-    const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    // Fast, reliable CartoDB Voyager raster tiles
+    const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
       maxZoom: 19,
       subdomains: 'abcd',
-    });
-    tileLayer.on('tileerror', () => {
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+      attribution: '&copy; CartoDB',
     });
     tileLayer.addTo(map);
 
