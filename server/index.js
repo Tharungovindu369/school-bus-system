@@ -11,6 +11,7 @@ import * as sheets from './services/sheets.js';
 import { sendWhatsAppNotification } from './services/whatsapp.js';
 import { getAllCredentials, updateCredential, getAdminPassword, getAccountantPin, getBusInchargePin } from './services/credentials.js';
 import * as reassignments from './services/reassignments.js';
+import { busNumberKey, formatBusNumber } from './utils.js';
 
 /**
  * Timing-safe string comparison — prevents timing attacks on passwords/PINs.
@@ -798,6 +799,9 @@ app.post('/api/bus/alert', authDriver, (req, res) => {
   try {
     const { bus_number, alert_type, message } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
+    if (req.driverBus && req.driverBus !== 'ALL' && busNumberKey(req.driverBus) !== busNumberKey(bus_number)) {
+      return res.status(403).json({ error: 'Forbidden: Cannot set alert for another bus' });
+    }
     const key = String(bus_number).replace(/^bus\s*/i, '').trim();
 
     let alertData = null;
@@ -829,6 +833,9 @@ app.post('/api/bus/location', locationLimiter, authDriver, async (req, res) => {
   try {
     const { bus_number, lat, lng } = req.body;
     if (!bus_number || lat == null || lng == null) return res.status(400).json({ error: 'bus_number, lat, lng required' });
+    if (req.driverBus && req.driverBus !== 'ALL' && busNumberKey(req.driverBus) !== busNumberKey(bus_number)) {
+      return res.status(403).json({ error: 'Forbidden: Cannot update location for another bus' });
+    }
     await sheets.updateBusLocation(bus_number, lat, lng);
     sheets.checkGeofenceNextStop(bus_number, lat, lng).catch(console.error);
 
@@ -943,6 +950,9 @@ app.post('/api/bus/start', authDriver, async (req, res) => {
   try {
     const { bus_number, fuel_reading, reason } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
+    if (req.driverBus && req.driverBus !== 'ALL' && busNumberKey(req.driverBus) !== busNumberKey(bus_number)) {
+      return res.status(403).json({ error: 'Forbidden: Cannot start trip for another bus' });
+    }
     const fuelVal = (fuel_reading == null || String(fuel_reading).trim() === '') ? 'N/A' : fuel_reading;
     const reasonVal = reason || '1. Pick up';
 
@@ -979,6 +989,9 @@ app.post('/api/bus/start-return', authDriver, async (req, res) => {
   try {
     const { bus_number, fuel_reading, reason } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
+    if (req.driverBus && req.driverBus !== 'ALL' && busNumberKey(req.driverBus) !== busNumberKey(bus_number)) {
+      return res.status(403).json({ error: 'Forbidden: Cannot start return trip for another bus' });
+    }
     const fuelVal = (fuel_reading == null || String(fuel_reading).trim() === '') ? 'N/A' : fuel_reading;
     const reasonVal = reason || '2. Drop';
 
@@ -1015,6 +1028,9 @@ app.post('/api/bus/stop', authDriver, async (req, res) => {
   try {
     const { bus_number, fuel_reading } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
+    if (req.driverBus && req.driverBus !== 'ALL' && busNumberKey(req.driverBus) !== busNumberKey(bus_number)) {
+      return res.status(403).json({ error: 'Forbidden: Cannot stop trip for another bus' });
+    }
     const fuelVal = (fuel_reading == null || String(fuel_reading).trim() === '') ? 'N/A' : fuel_reading;
 
     const endTime = nowTimestamp();
@@ -1028,6 +1044,9 @@ app.post('/api/bus/stop-return', authDriver, async (req, res) => {
   try {
     const { bus_number, fuel_reading } = req.body;
     if (!bus_number) return res.status(400).json({ error: 'bus_number required' });
+    if (req.driverBus && req.driverBus !== 'ALL' && busNumberKey(req.driverBus) !== busNumberKey(bus_number)) {
+      return res.status(403).json({ error: 'Forbidden: Cannot stop return trip for another bus' });
+    }
     const fuelVal = (fuel_reading == null || String(fuel_reading).trim() === '') ? 'N/A' : fuel_reading;
 
     const endTime = nowTimestamp();
@@ -1041,6 +1060,9 @@ app.post('/api/bus/stop-return', authDriver, async (req, res) => {
 app.post('/api/scan', scanLimiter, authScan, async (req, res) => {
   try {
     const { student_id, driver_name, bus_number, stop_name } = req.body;
+    if (req.driverBus && req.driverBus !== 'ALL' && bus_number && busNumberKey(req.driverBus) !== busNumberKey(bus_number)) {
+      return res.status(403).json({ error: 'Forbidden: Cannot submit scans for another bus' });
+    }
     const student = await sheets.getStudentById(student_id.trim().toUpperCase());
     if (!student) return res.status(404).json({ error: 'Student not found' });
     if (student.status === 'INACTIVE') {
