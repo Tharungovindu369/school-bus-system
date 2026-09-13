@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { api, todayStr, exportCSV } from '../api';
 import Spinner from '../components/Spinner';
 import BusMap from '../components/BusMap';
@@ -116,48 +118,91 @@ function AddBusModal({ onClose, onSave }) {
   );
 }
 
+const STOP_PICKER_ICON = L.divIcon({
+  className: 'custom-stop-picker-marker',
+  html: `
+    <div style="position:relative; display:flex; flex-direction:column; align-items:center;">
+      <div style="width:28px; height:28px; background:#2563eb; border:2.5px solid #ffffff; border-radius:50% 50% 50% 0; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; box-shadow:0 3px 8px rgba(0,0,0,0.35);">
+        <div style="transform:rotate(45deg); font-size:13px; line-height:1;">📍</div>
+      </div>
+      <div style="width:8px; height:8px; background:rgba(0,0,0,0.25); border-radius:50%; margin-top:2px;"></div>
+    </div>
+  `,
+  iconSize: [28, 38],
+  iconAnchor: [14, 34],
+});
+
 function StopMapPicker({ lat, lng, onChange }) {
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const markerRef = useRef(null);
 
   useEffect(() => {
-    if (!window.L || !mapRef.current) return;
+    if (!mapRef.current) return;
+    if (mapInstance.current) return;
 
     const initialLat = parseFloat(lat) || 16.7375;
     const initialLng = parseFloat(lng) || 78.0017;
 
-    // Initialize map
-    const map = window.L.map(mapRef.current).setView([initialLat, initialLng], 13);
+    const map = L.map(mapRef.current, {
+      zoomControl: true,
+      attributionControl: false,
+    }).setView([initialLat, initialLng], 13);
     mapInstance.current = map;
 
-    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
+    // Fast CartoDB Voyager tiles with OSM fallback
+    const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      subdomains: 'abcd',
+    });
+    tileLayer.on('tileerror', () => {
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+    });
+    tileLayer.addTo(map);
 
-    // Create marker
-    const marker = window.L.marker([initialLat, initialLng], { draggable: true }).addTo(map);
+    // Draggable custom marker
+    const marker = L.marker([initialLat, initialLng], {
+      draggable: true,
+      icon: STOP_PICKER_ICON,
+    }).addTo(map);
     markerRef.current = marker;
 
-    // Handle marker drag
     marker.on('dragend', () => {
       const position = marker.getLatLng();
       onChange(position.lat.toFixed(6), position.lng.toFixed(6));
     });
 
-    // Handle map click
     map.on('click', (e) => {
       const position = e.latlng;
       marker.setLatLng(position);
       onChange(position.lat.toFixed(6), position.lng.toFixed(6));
     });
 
-    // Fix map loading sizes
-    setTimeout(() => map.invalidateSize(), 200);
+    // Fix map loading sizes with multiple ticks
+    const t1 = setTimeout(() => map.invalidateSize(), 50);
+    const t2 = setTimeout(() => map.invalidateSize(), 200);
+    const t3 = setTimeout(() => map.invalidateSize(), 600);
 
     return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
       map.remove();
+      mapInstance.current = null;
+      markerRef.current = null;
     };
+  }, []);
+
+  // ResizeObserver ensures map is properly rendered when Route Stops tab is clicked
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const ro = new ResizeObserver(() => {
+      if (mapInstance.current) {
+        mapInstance.current.invalidateSize();
+      }
+    });
+    ro.observe(mapRef.current);
+    return () => ro.disconnect();
   }, []);
 
   // Update marker position if coordinates change externally
@@ -170,15 +215,16 @@ function StopMapPicker({ lat, lng, onChange }) {
     const currentPos = markerRef.current.getLatLng();
     if (Math.abs(currentPos.lat - parsedLat) > 0.0001 || Math.abs(currentPos.lng - parsedLng) > 0.0001) {
       markerRef.current.setLatLng([parsedLat, parsedLng]);
-      mapInstance.current.setView([parsedLat, parsedLng]);
+      mapInstance.current.setView([parsedLat, parsedLng], mapInstance.current.getZoom() || 13);
     }
   }, [lat, lng]);
 
   return (
     <div className="border border-slate-200 rounded-xl overflow-hidden mb-3 animate-fadeIn">
-      <div ref={mapRef} className="w-full h-[180px] bg-slate-100" />
-      <div className="bg-slate-50 p-2 text-center text-[10px] text-slate-400 font-semibold border-t">
-        🖱️ Click anywhere on the map or drag the marker to pick coordinates
+      <div ref={mapRef} className="w-full h-[200px] bg-slate-100" />
+      <div className="bg-slate-50 p-2 text-center text-[10px] text-slate-500 font-semibold border-t flex items-center justify-center gap-1">
+        <span>📍</span>
+        <span>Click anywhere on the map or drag the blue pin to set stop coordinates</span>
       </div>
     </div>
   );

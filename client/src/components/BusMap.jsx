@@ -1,25 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
-import { formatBusNumber, busesMatch, busNumberKey } from '../utils';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { formatBusNumber, busesMatch } from '../utils';
 import Spinner from './Spinner';
 
-const DEFAULT_CENTER = [16.7375, 78.0017]; // Mahabubnagar, Telangana
-const OSM_TILE = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-
-function waitForLeaflet(maxAttempts = 50) {
-  return new Promise((resolve, reject) => {
-    let attempts = 0;
-    const check = () => {
-      if (window.L) return resolve(window.L);
-      attempts += 1;
-      if (attempts >= maxAttempts) return reject(new Error('Leaflet failed to load'));
-      setTimeout(check, 100);
-    };
-    check();
-  });
+// Ensure window.L is available globally
+if (typeof window !== 'undefined' && !window.L) {
+  window.L = L;
 }
 
+// Configure Leaflet default icons to cdnjs fallback to prevent 404 image errors
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+});
+
+const DEFAULT_CENTER = [16.7375, 78.0017]; // Prathibha Jr College, Mahabubnagar, Telangana
+const CARTO_TILE = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+const OSM_TILE = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+
 export default function BusMap({
-  buses,
+  buses = [],
   center,
   zoom = 12,
   highlightBus = null,
@@ -29,115 +32,179 @@ export default function BusMap({
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const markersLayer = useRef(null);
+  const collegeLayer = useRef(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
 
+  // 1. Initialize Map
   useEffect(() => {
-    let cancelled = false;
+    if (!mapRef.current) return;
+    if (mapInstance.current) return;
 
-    (async () => {
-      try {
-        const L = await waitForLeaflet();
-        if (cancelled || !mapRef.current || mapInstance.current) return;
+    try {
+      const mapCenter = center ? [center.lat, center.lng] : DEFAULT_CENTER;
+      const map = L.map(mapRef.current, {
+        zoomControl: true,
+        attributionControl: false,
+      }).setView(mapCenter, zoom);
 
-        const mapCenter = center ? [center.lat, center.lng] : DEFAULT_CENTER;
-        const map = L.map(mapRef.current, { zoomControl: true }).setView(mapCenter, zoom);
+      // Primary fast CartoDB Voyager tiles with OpenStreetMap fallback
+      const tileLayer = L.tileLayer(CARTO_TILE, {
+        maxZoom: 19,
+        subdomains: 'abcd',
+      });
 
-        L.tileLayer(OSM_TILE, {
-          maxZoom: 19,
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        }).addTo(map);
+      tileLayer.on('tileerror', () => {
+        L.tileLayer(OSM_TILE, { maxZoom: 19 }).addTo(map);
+      });
 
-        markersLayer.current = L.layerGroup().addTo(map);
-        mapInstance.current = map;
-        setReady(true);
+      tileLayer.addTo(map);
 
-        setTimeout(() => map.invalidateSize(), 100);
-      } catch (err) {
-        if (!cancelled) setError(err.message || 'Failed to load map');
-      }
-    })();
+      // College anchor marker (Prathibha Junior College)
+      collegeLayer.current = L.layerGroup().addTo(map);
+      const collegeIcon = L.divIcon({
+        className: 'custom-college-marker',
+        html: `
+          <div style="background:#1e3a8a; color:white; padding:3px 8px; border-radius:12px; font-weight:bold; font-size:11px; border:2px solid #fbbf24; box-shadow:0 3px 8px rgba(0,0,0,0.3); display:flex; align-items:center; gap:4px; white-space:nowrap;">
+            <span>🏫</span>
+            <span>Prathibha College</span>
+          </div>
+        `,
+        iconSize: [120, 26],
+        iconAnchor: [60, 13],
+      });
+      L.marker(DEFAULT_CENTER, { icon: collegeIcon })
+        .bindPopup(`<strong>🏫 Prathibha Junior College</strong><br/>Central Campus & Bus Depot`)
+        .addTo(collegeLayer.current);
+
+      markersLayer.current = L.layerGroup().addTo(map);
+      mapInstance.current = map;
+      setReady(true);
+
+      // Multiple sizing ticks to eliminate blank grey box
+      setTimeout(() => map.invalidateSize(), 50);
+      setTimeout(() => map.invalidateSize(), 200);
+      setTimeout(() => map.invalidateSize(), 600);
+    } catch (err) {
+      console.error('Leaflet initialization error:', err);
+      setError(err.message || 'Failed to initialize map');
+    }
 
     return () => {
-      cancelled = true;
       if (mapInstance.current) {
         mapInstance.current.remove();
         mapInstance.current = null;
         markersLayer.current = null;
+        collegeLayer.current = null;
       }
     };
   }, [center, zoom]);
 
+  // 2. ResizeObserver to permanently fix tab switching grey box
   useEffect(() => {
-    if (!ready || !mapInstance.current || !markersLayer.current || !window.L) return;
+    if (!mapRef.current) return;
+    const ro = new ResizeObserver(() => {
+      if (mapInstance.current) {
+        mapInstance.current.invalidateSize();
+      }
+    });
+    ro.observe(mapRef.current);
+    return () => ro.disconnect();
+  }, []);
 
-    const L = window.L;
+  // 3. Render Bus Markers
+  useEffect(() => {
+    if (!ready || !mapInstance.current || !markersLayer.current) return;
+
     const map = mapInstance.current;
     const layer = markersLayer.current;
-
     layer.clearLayers();
 
-    const validBuses = (buses || []).filter((b) => {
-      const lat = parseFloat(b.latitude || b.current_lat || b.lat);
-      const lng = parseFloat(b.longitude || b.current_lng || b.lng);
-      if (isNaN(lat) || isNaN(lng)) return false;
+    const latLngs = [DEFAULT_CENTER];
 
-      // Only show buses that are actively running and updated within the last 30 minutes
-      if (!b.last_updated) return false;
-      const lastUpdate = new Date(b.last_updated).getTime();
-      const isRecent = (Date.now() - lastUpdate) < 30 * 60 * 1000;
-      const isRunning = ['morning_running', 'return_running'].includes(b.current_status);
-      return isRunning && isRecent;
-    });
-
-    const latLngs = [];
-
-    validBuses.forEach((bus) => {
+    (buses || []).forEach((bus) => {
       const lat = parseFloat(bus.latitude || bus.current_lat || bus.lat);
       const lng = parseFloat(bus.longitude || bus.current_lng || bus.lng);
+      if (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) return;
+
       const isHighlight = highlightBus && busesMatch(bus.bus_number, highlightBus);
+      const isRunning = ['morning_running', 'return_running'].includes(bus.current_status);
+      const lastUpdate = bus.last_updated ? new Date(bus.last_updated).getTime() : 0;
+      const isRecent = (Date.now() - lastUpdate) < 45 * 60 * 1000;
+      const isActiveNow = isRunning && isRecent;
 
-      const marker = L.circleMarker([lat, lng], {
-        radius: isHighlight ? 14 : 10,
-        fillColor: isHighlight ? '#dc2626' : '#2563eb',
-        color: '#ffffff',
-        weight: 2,
-        opacity: 1,
-        fillOpacity: 0.9,
+      const markerColor = isHighlight
+        ? '#dc2626'
+        : isActiveNow
+          ? '#10b981'
+          : '#64748b';
+
+      const busLabel = formatBusNumber(bus.bus_number);
+      const statusText = isActiveNow
+        ? (bus.current_status === 'return_running' ? 'Return Route 🔄' : 'Morning Route 🟢')
+        : 'Parked / Depot 🅿️';
+
+      const busDivIcon = L.divIcon({
+        className: 'custom-bus-marker',
+        html: `
+          <div style="position:relative; display:flex; flex-direction:column; align-items:center;">
+            ${isActiveNow ? '<div style="position:absolute; width:34px; height:34px; background:' + markerColor + '; opacity:0.4; border-radius:50%; animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite; top:-4px;"></div>' : ''}
+            <div style="width:26px; height:26px; background:${markerColor}; border:2px solid #ffffff; border-radius:50%; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 6px rgba(0,0,0,0.35); color:white; font-size:12px;">
+              🚌
+            </div>
+            <div style="background:#0f172a; color:#ffffff; font-weight:800; font-size:10px; padding:1px 5px; border-radius:6px; margin-top:2px; white-space:nowrap; box-shadow:0 1px 3px rgba(0,0,0,0.3);">
+              ${busLabel}
+            </div>
+          </div>
+        `,
+        iconSize: [40, 48],
+        iconAnchor: [20, 24],
       });
 
-      marker.bindPopup(
-        `<div style="min-width:120px">
-          <strong>${formatBusNumber(bus.bus_number)}</strong><br/>
-          ${bus.driver_name || 'Driver not assigned'}
-        </div>`
-      );
+      const marker = L.marker([lat, lng], { icon: busDivIcon });
 
-      marker.bindTooltip(busNumberKey(bus.bus_number), {
-        permanent: true,
-        direction: 'top',
-        offset: [0, -10],
-        className: 'bus-marker-label',
-      });
+      const lastSeenText = bus.last_updated
+        ? new Date(bus.last_updated).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })
+        : 'N/A';
+
+      marker.bindPopup(`
+        <div style="min-width:160px; font-family:sans-serif; text-align:left;">
+          <div style="font-weight:bold; font-size:14px; margin-bottom:2px; color:#0f172a;">
+            🚌 ${busLabel}
+          </div>
+          <div style="font-size:11px; font-weight:700; color:${isActiveNow ? '#059669' : '#64748b'}; margin-bottom:6px;">
+            ${statusText}
+          </div>
+          <div style="font-size:11px; color:#334155; line-height:1.4;">
+            <strong>Driver:</strong> ${bus.driver_name || 'Not assigned'}<br/>
+            ${bus.current_stop ? `<strong>Last Stop:</strong> ${bus.current_stop}<br/>` : ''}
+            ${bus.next_stop ? `<strong>Next Stop:</strong> ${bus.next_stop}<br/>` : ''}
+            <strong>Updated:</strong> ${lastSeenText}
+          </div>
+        </div>
+      `);
 
       marker.addTo(layer);
       latLngs.push([lat, lng]);
     });
 
-    if (highlightBus && validBuses.length) {
-      const bus = validBuses.find((b) => busesMatch(b.bus_number, highlightBus));
-      if (bus) {
-        map.setView([parseFloat(bus.current_lat), parseFloat(bus.current_lng)], 14);
+    if (highlightBus) {
+      const target = (buses || []).find((b) => busesMatch(b.bus_number, highlightBus));
+      if (target) {
+        const tLat = parseFloat(target.latitude || target.current_lat || target.lat);
+        const tLng = parseFloat(target.longitude || target.current_lng || target.lng);
+        if (!isNaN(tLat) && !isNaN(tLng) && tLat !== 0) {
+          map.setView([tLat, tLng], 14);
+          return;
+        }
       }
-    } else if (latLngs.length > 1) {
-      map.fitBounds(latLngs, { padding: [40, 40] });
-    } else if (latLngs.length === 1) {
-      map.setView(latLngs[0], 14);
+    }
+
+    if (latLngs.length > 1) {
+      map.fitBounds(latLngs, { padding: [40, 40], maxZoom: 15 });
     } else {
       map.setView(DEFAULT_CENTER, zoom);
     }
-
-    setTimeout(() => map.invalidateSize(), 50);
   }, [buses, highlightBus, ready, zoom]);
 
   if (error) {
