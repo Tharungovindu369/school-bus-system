@@ -172,6 +172,27 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 
+// UptimeRobot & Health check tracker
+let lastUptimePing = {
+  timestamp: null,
+  userAgent: null,
+  url: null,
+  count: 0
+};
+
+app.use((req, res, next) => {
+  const ua = req.headers['user-agent'] || '';
+  if (ua.toLowerCase().includes('uptimerobot') || req.path === '/api/health' || req.path === '/health') {
+    lastUptimePing = {
+      timestamp: new Date().toISOString(),
+      userAgent: ua,
+      url: req.originalUrl,
+      count: lastUptimePing.count + 1
+    };
+  }
+  next();
+});
+
 // RATE LIMITERS
 const isLocalTest = (req) => process.env.NODE_ENV === 'test' || (process.env.NODE_ENV !== 'production' && (req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1'));
 
@@ -509,7 +530,17 @@ async function authBusStudents(req, res, next) {
 }
 
 // HEALTH & PUBLIC ROUTES
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', school: config.schoolName }));
+app.get(['/api/health', '/health'], (_req, res) => res.json({
+  status: 'ok',
+  school: config.schoolName,
+  uptimeMonitor: {
+    isReceivingPings: lastUptimePing.count > 0,
+    totalPingsReceived: lastUptimePing.count,
+    lastPingTimestamp: lastUptimePing.timestamp,
+    lastPingSource: lastUptimePing.userAgent || 'None yet',
+    lastPingTarget: lastUptimePing.url || 'None yet'
+  }
+}));
 app.get('/api/config/maps-key', (_req, res) => res.json({ apiKey: config.googleMapsApiKey }));
 app.get('/api/config/scan-mode', async (req, res) => {
   try {
