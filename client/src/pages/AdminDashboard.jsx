@@ -155,10 +155,11 @@ function StopMapPicker({ lat, lng, onChange }) {
     }).setView([initialLat, initialLng], 13);
     mapInstance.current = map;
 
-    // Standard OpenStreetMap tiles (free, clear colors, no API key, no watermark)
-    const tileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    // Google Maps Roadmap tiles (most accurate local street and colony names)
+    const tileLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+      maxZoom: 20,
+      subdomains: '0123',
+      attribution: '&copy; Google Maps',
     });
     tileLayer.addTo(map);
 

@@ -78,6 +78,11 @@ export default function ParentTrack() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
+  const isRunning = ['morning_running', 'return_running'].includes(bus.current_status);
+  const lastUpdateMs = bus.last_updated ? new Date(bus.last_updated).getTime() : 0;
+  const isRecent = (Date.now() - lastUpdateMs) < 45 * 60 * 1000;
+  const isLiveActive = isRunning && isRecent;
+
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="bg-primary text-white p-4 shadow">
@@ -101,6 +106,45 @@ export default function ParentTrack() {
       </div>
 
       <div className="p-4">
+        {/* Live Trip Status Banner */}
+        {isLiveActive ? (
+          <div className="mb-4 bg-emerald-600 text-white rounded-2xl p-4 shadow-lg border border-emerald-500 flex items-center justify-between animate-fadeIn">
+            <div className="flex items-center gap-3">
+              <div className="relative flex items-center justify-center">
+                <span className="w-3.5 h-3.5 rounded-full bg-white animate-ping absolute opacity-75"></span>
+                <span className="w-3.5 h-3.5 rounded-full bg-white"></span>
+              </div>
+              <div>
+                <p className="font-extrabold text-sm uppercase tracking-wider text-emerald-50">
+                  {bus.current_status === 'return_running' ? 'Return Trip in Progress 🔄' : 'Morning Trip in Progress 🟢'}
+                </p>
+                <p className="text-xs text-emerald-100 mt-0.5">
+                  Bus is moving live • GPS updates every 10 seconds
+                  {bus.next_stop ? ` • Next Stop: ${bus.next_stop}` : ''}
+                </p>
+              </div>
+            </div>
+            <span className="text-[11px] font-black bg-white text-emerald-800 px-2.5 py-1 rounded-lg uppercase tracking-wider shadow-sm">
+              LIVE
+            </span>
+          </div>
+        ) : (
+          <div className="mb-4 bg-slate-800 text-white rounded-2xl p-4 shadow-md border border-slate-700 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">🅿️</span>
+              <div>
+                <p className="font-bold text-sm text-slate-100">Trip Inactive / Bus Parked</p>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Showing last recorded location (Campus / Depot). Live tracking starts when the driver begins the trip.
+                </p>
+              </div>
+            </div>
+            <span className="text-[11px] font-bold bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg whitespace-nowrap">
+              PARKED
+            </span>
+          </div>
+        )}
+
         {bus.active_alert?.message && (
           <div className="mb-4 bg-amber-500 text-white rounded-2xl p-4 shadow-lg border-2 border-amber-600 flex items-center gap-3 animate-pulse">
             <span className="text-3xl">📢</span>

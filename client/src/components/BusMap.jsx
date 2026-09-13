@@ -18,7 +18,36 @@ L.Icon.Default.mergeOptions({
 });
 
 const DEFAULT_CENTER = [16.7375, 78.0017]; // Prathibha Jr College, Mahabubnagar, Telangana
-const MAP_TILE = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+const TILE_LAYERS = {
+  roadmap: {
+    id: 'roadmap',
+    name: 'Map',
+    icon: '🗺️',
+    url: 'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+    subdomains: '0123',
+    maxZoom: 20,
+    attribution: '&copy; Google Maps',
+  },
+  satellite: {
+    id: 'satellite',
+    name: 'Satellite',
+    icon: '🛰️',
+    url: 'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+    subdomains: '0123',
+    maxZoom: 20,
+    attribution: '&copy; Google Maps',
+  },
+  osm: {
+    id: 'osm',
+    name: 'OSM',
+    icon: '🌐',
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    subdomains: 'abc',
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap',
+  },
+};
 
 export default function BusMap({
   buses = [],
@@ -30,11 +59,13 @@ export default function BusMap({
 }) {
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
+  const tileLayerRef = useRef(null);
   const markersLayer = useRef(null);
   const collegeLayer = useRef(null);
   const hasInitiallyCentered = useRef(false);
   const userInteracted = useRef(false);
   const lastHighlightBus = useRef(highlightBus);
+  const [mapType, setMapType] = useState('roadmap');
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
 
@@ -46,6 +77,21 @@ export default function BusMap({
       hasInitiallyCentered.current = false;
     }
   }, [highlightBus]);
+
+  // Dynamic Tile Switching (Google Roadmap vs Satellite vs OSM)
+  useEffect(() => {
+    if (!mapInstance.current) return;
+    const map = mapInstance.current;
+    if (tileLayerRef.current) {
+      map.removeLayer(tileLayerRef.current);
+    }
+    const provider = TILE_LAYERS[mapType] || TILE_LAYERS.roadmap;
+    tileLayerRef.current = L.tileLayer(provider.url, {
+      maxZoom: provider.maxZoom,
+      subdomains: provider.subdomains,
+      attribution: provider.attribution,
+    }).addTo(map);
+  }, [mapType]);
 
   // 1. Initialize Map
   useEffect(() => {
@@ -69,12 +115,13 @@ export default function BusMap({
         userInteracted.current = true;
       });
 
-      // Standard OpenStreetMap tiles (free, clear colors, no API key, no watermark)
-      const tileLayer = L.tileLayer(MAP_TILE, {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      });
-      tileLayer.addTo(map);
+      // Google Maps Roadmap tiles (most up-to-date, recognizable roads/colonies in India)
+      const provider = TILE_LAYERS.roadmap;
+      tileLayerRef.current = L.tileLayer(provider.url, {
+        maxZoom: provider.maxZoom,
+        subdomains: provider.subdomains,
+        attribution: provider.attribution,
+      }).addTo(map);
 
       // College anchor marker (Prathibha Junior College)
       collegeLayer.current = L.layerGroup().addTo(map);
@@ -285,15 +332,44 @@ export default function BusMap({
       <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
 
       {ready && (
-        <button
-          type="button"
-          onClick={handleRecenter}
-          className="absolute top-3 right-3 z-[500] bg-white/95 hover:bg-white active:scale-95 text-slate-800 text-xs font-bold px-3 py-1.5 rounded-xl shadow-md border border-slate-200 flex items-center gap-1.5 transition cursor-pointer"
-          title="Recenter Map"
-        >
-          <span>🎯</span>
-          <span>{highlightBus ? 'Follow Bus' : 'Recenter Fleet'}</span>
-        </button>
+        <div className="absolute top-3 right-3 z-[500] flex items-center gap-2">
+          {/* Map Layer Switcher: Google Road vs Satellite */}
+          <div className="bg-white/95 backdrop-blur-sm p-0.5 rounded-xl shadow-md border border-slate-200 flex items-center">
+            <button
+              type="button"
+              onClick={() => setMapType('roadmap')}
+              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition ${
+                mapType === 'roadmap'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              🗺️ Map
+            </button>
+            <button
+              type="button"
+              onClick={() => setMapType('satellite')}
+              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition ${
+                mapType === 'satellite'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              🛰️ Satellite
+            </button>
+          </div>
+
+          {/* Follow / Recenter button */}
+          <button
+            type="button"
+            onClick={handleRecenter}
+            className="bg-white/95 hover:bg-white active:scale-95 text-slate-800 text-xs font-bold px-3 py-1.5 rounded-xl shadow-md border border-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+            title="Recenter Map"
+          >
+            <span>🎯</span>
+            <span>{highlightBus ? 'Follow Bus' : 'Recenter'}</span>
+          </button>
+        </div>
       )}
     </div>
   );
