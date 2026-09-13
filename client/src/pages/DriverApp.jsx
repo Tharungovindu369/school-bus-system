@@ -287,6 +287,15 @@ export default function DriverApp() {
   const [submittingOdoLog, setSubmittingOdoLog] = useState(false);
   const [odometerStats, setOdometerStats] = useState(null);
 
+  const [assignedStudents, setAssignedStudents] = useState([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [todayAttendance, setTodayAttendance] = useState([]);
+  const [rosterModalOpen, setRosterModalOpen] = useState(false);
+  const [rosterTab, setRosterTab] = useState('not_boarded'); // 'not_boarded' | 'boarded' | 'all'
+  const [rosterSearch, setRosterSearch] = useState('');
+  const [selectedStopFilter, setSelectedStopFilter] = useState('ALL');
+  const [quickBoardingId, setQuickBoardingId] = useState(null);
+
   const [cameraActive, setCameraActive] = useState(false);
   const [scanningOdo, setScanningOdo] = useState(false);
   const videoRef = useRef(null);
@@ -511,15 +520,30 @@ export default function DriverApp() {
     if (!loggedIn) return;
     try {
       const attendance = await api.getAttendance(todayStr());
-      const boarded = attendance.filter(
+      const records = Array.isArray(attendance) ? attendance : [];
+      setTodayAttendance(records);
+      const boarded = records.filter(
         (a) => busesMatch(a.bus_number, loggedIn) && a.scan_type === 'boarding'
       ).length;
-      const dropped = attendance.filter(
+      const dropped = records.filter(
         (a) => busesMatch(a.bus_number, loggedIn) && a.scan_type === 'dropoff'
       ).length;
       setBoardedCount(boarded);
       setDropoffCount(dropped);
     } catch { /* ignore */ }
+  }, [loggedIn]);
+
+  const loadAssignedStudents = useCallback(async () => {
+    if (!loggedIn) return;
+    try {
+      setLoadingStudents(true);
+      const list = await api.getStudentsByBus(loggedIn);
+      setAssignedStudents(Array.isArray(list) ? list : []);
+    } catch (err) {
+      console.warn('Failed to load bus students:', err);
+    } finally {
+      setLoadingStudents(false);
+    }
   }, [loggedIn]);
 
   const syncOfflineQueue = useCallback(async () => {
@@ -619,15 +643,17 @@ export default function DriverApp() {
     if (!loggedIn) return;
     loadBusInfo();
     loadCounts();
+    loadAssignedStudents();
     loadScanMode();
     loadOdometerStats();
     const modeInterval = setInterval(() => {
       loadBusInfo();
+      loadCounts();
       loadScanMode();
       loadOdometerStats();
     }, 60000);
     return () => clearInterval(modeInterval);
-  }, [loggedIn, loadCounts, loadScanMode, loadBusInfo, loadOdometerStats]);
+  }, [loggedIn, loadCounts, loadAssignedStudents, loadScanMode, loadBusInfo, loadOdometerStats]);
 
   const isTripActive = morningRunning || returnRunning;
 
@@ -872,6 +898,57 @@ export default function DriverApp() {
     await processStudent(studentIdInput);
   };
 
+  const handleShareWhatsApp = async () => {
+    if (!loggedIn) return;
+    const cleanBus = formatBusNumber(loggedIn);
+    const busDigits = String(loggedIn).replace(/^bus\s*/i, '').trim();
+    const trackUrl = `${window.location.origin}/track/${encodeURIComponent(busDigits)}`;
+    const isRet = scanMode?.isDropoff || scanMode?.journeyType === 'return' || scanMode?.currentStatus === 'return_running';
+    const modeTitle = isRet ? 'Evening Return Journey 🔄' : 'Morning Pickup Journey 🚌';
+
+    const message = `🚌 *Prathibha Junior College - Live School Bus Tracker*\n\n` +
+      `*Bus:* ${cleanBus}\n` +
+      `*Trip:* ${modeTitle}\n` +
+      `*Driver:* ${driverName || 'College Driver'}\n` +
+      `*Status:* 🟢 Bus is On the Way\n\n` +
+      `📍 *Click to Track Live Bus Location on Map:*\n` +
+      `${trackUrl}\n\n` +
+      `_Parents can track the bus live in real-time. No login required!_`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Live Bus Tracking - ${cleanBus}`,
+          text: message,
+          url: trackUrl,
+        });
+        toast.success(t('driver.shareSuccess') || 'Link shared successfully!');
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+
+    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+    window.open(waUrl, '_blank');
+    toast.success(t('driver.shareSuccess') || 'Live tracking link shared on WhatsApp!');
+  };
+
+  const handleQuickAction = async (student) => {
+    if (processing || quickBoardingId) return;
+    setQuickBoardingId(student.student_id);
+    try {
+      await processStudent(student.student_id);
+      await loadCounts();
+      const isRet = scanMode.isDropoff || scanMode.journeyType === 'return' || scanMode.currentStatus === 'return_running';
+      toast.success(`${student.name} marked ${isRet ? 'dropped' : 'boarded'} ✅`);
+    } catch (err) {
+      toast.error(err.message || 'Action failed');
+    } finally {
+      setQuickBoardingId(null);
+    }
+  };
+
   const executeStartJourney = async (fuel, reason, type) => {
     if (type === 'morning') {
       setStartingBus(true);
@@ -1006,6 +1083,7 @@ export default function DriverApp() {
 
   const isDropoff = scanMode.isDropoff;
   const isReturn = scanMode.journeyType === 'return' || scanMode.currentStatus === 'return_running';
+  const isReturnOrDropoff = isDropoff || isReturn;
 
   const modeLabel = isDropoff
     ? '📍 Drop-off Mode'
@@ -1018,6 +1096,58 @@ export default function DriverApp() {
     : isReturn
       ? 'bg-purple-100 text-purple-800'
       : 'bg-green-100 text-paid';
+
+  const boardedSet = new Set();
+  const droppedSet = new Set();
+
+  (todayAttendance || []).forEach((a) => {
+    if (busesMatch(a.bus_number, loggedIn)) {
+      const id = String(a.student_id || '').trim();
+      if (!id) return;
+      if (a.scan_type === 'boarding') boardedSet.add(id);
+      if (a.scan_type === 'dropoff') droppedSet.add(id);
+    }
+  });
+
+  const queuedItems = getOfflineQueue();
+  queuedItems.forEach((item) => {
+    if (busesMatch(item.bus_number, loggedIn) && item.student_id) {
+      const id = String(item.student_id).trim();
+      if (isDropoff) {
+        droppedSet.add(id);
+      } else {
+        boardedSet.add(id);
+      }
+    }
+  });
+
+  const notBoardedList = assignedStudents.filter((s) => !boardedSet.has(String(s.student_id).trim()));
+  const boardedList = assignedStudents.filter((s) => boardedSet.has(String(s.student_id).trim()));
+
+  const notDroppedList = assignedStudents.filter((s) => !droppedSet.has(String(s.student_id).trim()));
+  const droppedList = assignedStudents.filter((s) => droppedSet.has(String(s.student_id).trim()));
+
+  const currentNotList = isReturnOrDropoff ? notDroppedList : notBoardedList;
+  const currentDoneList = isReturnOrDropoff ? droppedList : boardedList;
+
+  const uniqueStops = Array.from(new Set(assignedStudents.map((s) => s.stop_name).filter(Boolean))).sort();
+
+  const displayedStudents = (
+    rosterTab === 'not_boarded' ? currentNotList :
+    rosterTab === 'boarded' ? currentDoneList :
+    assignedStudents
+  ).filter((s) => {
+    if (selectedStopFilter !== 'ALL' && s.stop_name !== selectedStopFilter) return false;
+    if (rosterSearch.trim()) {
+      const q = rosterSearch.toLowerCase().trim();
+      const matchName = (s.name || '').toLowerCase().includes(q);
+      const matchId = (s.student_id || '').toLowerCase().includes(q);
+      const matchStop = (s.stop_name || '').toLowerCase().includes(q);
+      const matchClass = (s.class || '').toLowerCase().includes(q);
+      return matchName || matchId || matchStop || matchClass;
+    }
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -1058,15 +1188,61 @@ export default function DriverApp() {
       )}
 
       <div className="flex text-white text-center font-bold text-sm">
-        <div className="flex-1 bg-paid py-3">{t('driver.boardedCount')} {boardedCount}</div>
-        <div className="flex-1 bg-primary py-3">{t('driver.droppedCount')} {dropoffCount}</div>
+        <div className="flex-1 bg-paid py-2.5">
+          <span className="block text-[11px] opacity-85 font-normal">{t('driver.boardedCount')}</span>
+          <span className="text-lg">{boardedCount}</span>
+        </div>
+        <div className="flex-1 bg-amber-600 py-2.5">
+          <span className="block text-[11px] opacity-85 font-normal">
+            {isReturnOrDropoff ? 'Pending Drop:' : (t('driver.notBoardedCount') || 'Not Boarded:')}
+          </span>
+          <span className="text-lg">{currentNotList.length}</span>
+        </div>
+        <div className="flex-1 bg-primary py-2.5">
+          <span className="block text-[11px] opacity-85 font-normal">Route Total:</span>
+          <span className="text-lg">{assignedStudents.length}</span>
+        </div>
       </div>
 
-      <div className={`text-center py-2 text-sm font-semibold ${modeClass}`}>
-        {modeLabel}
+      <div className={`text-center py-2 text-sm font-semibold flex justify-between items-center px-4 ${modeClass}`}>
+        <span>{modeLabel}</span>
+        <button
+          type="button"
+          onClick={() => setRosterModalOpen(true)}
+          className={`text-xs px-2.5 py-1 rounded-lg font-bold shadow-sm flex items-center gap-1 transition ${
+            currentNotList.length > 0 && !isReturnOrDropoff
+              ? 'bg-amber-600 text-white animate-pulse'
+              : 'bg-white/90 hover:bg-white text-slate-800'
+          }`}
+        >
+          📋 {t('driver.studentRoster') || 'Roster'} ({currentNotList.length} left)
+        </button>
       </div>
 
       <div className="p-4 max-w-lg mx-auto">
+        {!scanning && !manualEntry && !result && (
+          <div className="mb-4 bg-gradient-to-r from-emerald-600 to-teal-700 rounded-2xl p-4 shadow-lg text-white text-left animate-fadeIn flex justify-between items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1 text-[11px] font-black uppercase tracking-wider text-emerald-200">
+                <span>🟢 Live Route Link</span>
+              </div>
+              <p className="text-sm font-bold mt-0.5 truncate">
+                {t('driver.shareLiveRoute') || 'Share Live Route on WhatsApp'}
+              </p>
+              <p className="text-xs text-emerald-100 opacity-90 mt-0.5">
+                Post live map tracking link to parents' group in 1 tap
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleShareWhatsApp}
+              className="bg-white hover:bg-emerald-50 text-emerald-800 font-extrabold px-3.5 py-2.5 rounded-xl shadow text-xs flex items-center gap-1.5 shrink-0 active:scale-95 transition"
+            >
+              <span className="text-base">📲</span>
+              <span>Share Link</span>
+            </button>
+          </div>
+        )}
         {busInfo?.activeJourney && (
           <div className="mb-4 bg-white rounded-2xl p-4 shadow border border-slate-200 text-left text-slate-800 animate-fadeIn">
             <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2">📋 Current Trip Info</h3>
@@ -1586,6 +1762,243 @@ export default function DriverApp() {
           )
         )}
       </div>
+
+      {/* ─── NOT BOARDED & STUDENT ROSTER MODAL ──────────────────────────────── */}
+      {rosterModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col justify-end sm:justify-center items-center p-0 sm:p-4 animate-fadeIn">
+          <div className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col max-h-[90vh] sm:max-h-[85vh] overflow-hidden text-slate-800">
+            {/* Header */}
+            <div className="bg-primary text-white p-4 flex justify-between items-center shrink-0 shadow">
+              <div>
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  📋 {formatBusNumber(loggedIn)} Roster
+                </h2>
+                <p className="text-xs text-blue-100">
+                  {assignedStudents.length} Assigned • {currentNotList.length} {isReturnOrDropoff ? 'Pending Drop' : 'Not Boarded'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRosterModalOpen(false)}
+                className="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center font-bold text-lg transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex border-b border-slate-200 bg-slate-50 text-xs font-bold shrink-0">
+              <button
+                type="button"
+                onClick={() => setRosterTab('not_boarded')}
+                className={`flex-1 py-3 px-2 text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
+                  rosterTab === 'not_boarded'
+                    ? 'border-amber-500 text-amber-800 bg-amber-50'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <span>⚠️ {isReturnOrDropoff ? 'Pending Drop' : (t('driver.notBoardedList') || 'Not Boarded')}</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  rosterTab === 'not_boarded' ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {currentNotList.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRosterTab('boarded')}
+                className={`flex-1 py-3 px-2 text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
+                  rosterTab === 'boarded'
+                    ? 'border-emerald-500 text-emerald-800 bg-emerald-50'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <span>✅ {isReturnOrDropoff ? 'Dropped' : (t('driver.boardedList') || 'Boarded')}</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  rosterTab === 'boarded' ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {currentDoneList.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRosterTab('all')}
+                className={`flex-1 py-3 px-2 text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
+                  rosterTab === 'all'
+                    ? 'border-primary text-primary bg-blue-50'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <span>👥 {t('driver.allStudents') || 'All'}</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  rosterTab === 'all' ? 'bg-primary text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {assignedStudents.length}
+                </span>
+              </button>
+            </div>
+
+            {/* Search & Stop Filters */}
+            <div className="p-3 bg-white border-b border-slate-100 flex gap-2 shrink-0">
+              <div className="flex-1 relative">
+                <input
+                  type="text"
+                  value={rosterSearch}
+                  onChange={(e) => setRosterSearch(e.target.value)}
+                  placeholder="Search name, ID, stop..."
+                  className="w-full text-xs bg-slate-100 border border-slate-200 rounded-xl pl-8 pr-7 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <span className="absolute left-2.5 top-2.5 text-xs text-slate-400">🔍</span>
+                {rosterSearch && (
+                  <button
+                    onClick={() => setRosterSearch('')}
+                    className="absolute right-2.5 top-2 text-xs text-slate-400 hover:text-slate-600"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              {uniqueStops.length > 0 && (
+                <select
+                  value={selectedStopFilter}
+                  onChange={(e) => setSelectedStopFilter(e.target.value)}
+                  className="text-xs bg-slate-100 border border-slate-200 rounded-xl px-2 py-2 text-slate-700 font-medium max-w-[125px] truncate"
+                >
+                  <option value="ALL">All Stops</option>
+                  {uniqueStops.map((stop) => (
+                    <option key={stop} value={stop}>{stop}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Scrollable Students List */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+              {loadingStudents ? (
+                <div className="py-12 text-center text-slate-400">
+                  <Spinner size="md" />
+                  <p className="mt-2 text-xs">Loading bus roster...</p>
+                </div>
+              ) : displayedStudents.length === 0 ? (
+                <div className="py-12 text-center text-slate-500">
+                  <span className="text-4xl block mb-2">
+                    {rosterTab === 'not_boarded' ? '🎉' : '🔍'}
+                  </span>
+                  <p className="font-bold text-sm">
+                    {rosterTab === 'not_boarded'
+                      ? 'All students accounted for!'
+                      : 'No students found matching filter.'}
+                  </p>
+                  {rosterTab === 'not_boarded' && (
+                    <p className="text-xs text-slate-400 mt-1">
+                      Zero missed stops on this route. Safe to proceed!
+                    </p>
+                  )}
+                </div>
+              ) : (
+                displayedStudents.map((s) => {
+                  const isBoarded = boardedSet.has(String(s.student_id).trim());
+                  const isDropped = droppedSet.has(String(s.student_id).trim());
+                  const isDone = isReturnOrDropoff ? isDropped : isBoarded;
+                  const isQuickProcessing = quickBoardingId === s.student_id;
+
+                  return (
+                    <div
+                      key={s.student_id}
+                      className={`rounded-2xl p-3 border transition ${
+                        isDone
+                          ? 'bg-emerald-50/50 border-emerald-100 text-slate-700'
+                          : 'bg-white border-slate-200 hover:border-amber-300 shadow-sm'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-sm text-slate-900 truncate">
+                              {s.name}
+                            </span>
+                            <span className="text-[11px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                              {s.student_id}
+                            </span>
+                            {s.class && (
+                              <span className="text-[10px] font-semibold bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                                {s.class}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
+                            <span>📍</span>
+                            <span className="truncate font-medium">{s.stop_name || 'Assigned Stop'}</span>
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 flex flex-col items-end gap-1">
+                          {isDone ? (
+                            <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-xl flex items-center gap-1">
+                              ✅ {isReturnOrDropoff ? 'Dropped' : 'Boarded'}
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={isQuickProcessing || processing}
+                              onClick={() => handleQuickAction(s)}
+                              className="text-xs font-bold bg-primary hover:bg-blue-700 active:scale-95 text-white px-3 py-1.5 rounded-xl shadow-sm transition flex items-center gap-1"
+                            >
+                              {isQuickProcessing ? <Spinner size="sm" /> : '⚡'}
+                              <span>{isReturnOrDropoff ? (t('driver.allowDropoff') || 'Mark Dropped') : (t('driver.markBoarded') || 'Mark Boarded')}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Parent Phone & Direct Contact */}
+                      {!isDone && s.parent_whatsapp && (
+                        <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                          <span className="text-slate-400 truncate max-w-[130px]">
+                            {s.parent_name ? `Parent: ${s.parent_name}` : 'Guardian'}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <a
+                              href={`tel:${s.parent_whatsapp.replace(/\s+/g, '')}`}
+                              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 transition"
+                            >
+                              📞 {t('driver.callParent') || 'Call'}
+                            </a>
+                            <a
+                              href={`https://wa.me/91${s.parent_whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Namaste, Prathibha Jr College Bus ${formatBusNumber(loggedIn)} is reaching ${s.stop_name || 'the stop'}. Is ${s.name} ready?`)}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#128C7E] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 transition"
+                            >
+                              💬 WhatsApp
+                            </a>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center text-xs text-slate-500 shrink-0">
+              <span>Auto-syncs on every QR scan</span>
+              <button
+                type="button"
+                onClick={() => {
+                  loadAssignedStudents();
+                  loadCounts();
+                  toast.success('Roster refreshed 🔄');
+                }}
+                className="text-primary font-bold hover:underline flex items-center gap-1"
+              >
+                🔄 Refresh
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

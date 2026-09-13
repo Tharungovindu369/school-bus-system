@@ -454,6 +454,38 @@ async function authAttendance(req, res, next) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+async function authBusStudents(req, res, next) {
+  try {
+    const adminPwd = await getAdminPassword();
+    if (timingSafeCompare(req.headers['x-admin-password'], adminPwd)) {
+      req.busAccessScope = 'all';
+      return next();
+    }
+    const accPin = await getAccountantPin();
+    if (timingSafeCompare(req.headers['x-accountant-pin'], accPin)) {
+      req.busAccessScope = 'all';
+      return next();
+    }
+    const busPin = await getBusInchargePin();
+    if (timingSafeCompare(req.headers['x-bus-incharge-pin'], busPin)) {
+      req.busAccessScope = 'all';
+      return next();
+    }
+    const recPin = req.headers['x-reception-pin'];
+    if (timingSafeCompare(recPin, config.receptionPin)) {
+      req.busAccessScope = 'all';
+      return next();
+    }
+    const matchedBus = verifyDriverCredentials(req);
+    if (matchedBus) {
+      req.busAccessScope = 'bus';
+      req.driverBus = matchedBus;
+      return next();
+    }
+    res.status(401).json({ error: 'Unauthorized: Staff or driver credentials required' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
 // HEALTH & PUBLIC ROUTES
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', school: config.schoolName }));
 app.get('/api/config/maps-key', (_req, res) => res.json({ apiKey: config.googleMapsApiKey }));
@@ -566,6 +598,40 @@ app.get('/api/attendance', authAttendance, async (req, res) => {
 app.get('/api/buses', authAnyStaff, async (_req, res) => {
   try { res.json(await sheets.getBuses()); } 
   catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get(['/api/bus/:number/students', '/api/buses/:number/students'], authBusStudents, async (req, res) => {
+  try {
+    const { busNumberKey } = await import('./utils.js');
+    const requestedBus = req.params.number;
+    const requestedBusKey = busNumberKey(requestedBus);
+
+    // If accessed by a driver, ensure they only access their assigned bus
+    if (req.busAccessScope === 'bus' && req.driverBus) {
+      if (busNumberKey(req.driverBus) !== requestedBusKey && req.driverBus !== 'ALL') {
+        return res.status(403).json({ error: 'Forbidden: Drivers can only view students for their assigned bus' });
+      }
+    }
+
+    const students = await sheets.getStudentsByBus(requestedBus);
+    const safeList = (students || [])
+      .filter(s => String(s.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+      .map(s => ({
+        student_id: s.student_id,
+        name: s.name,
+        class: s.class,
+        bus_number: s.bus_number || s.assigned_bus || s.default_bus,
+        stop_name: s.stop_name || '',
+        parent_name: s.parent_name || '',
+        parent_whatsapp: s.parent_whatsapp || '',
+        fee_status: s.fee_status || '',
+        fee_due_date: s.fee_due_date || '',
+      }));
+
+    res.json(safeList);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── SSE REAL-TIME BUS TRACKING STREAM ──────────────────────────────────────

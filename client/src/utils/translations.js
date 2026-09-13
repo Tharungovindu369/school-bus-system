@@ -74,7 +74,16 @@ export const translations = {
       journeyReasonLabel: 'Purpose / Reason for Journey',
       startTripButton: 'Start Trip',
       endingFuelLabel: 'Ending Fuel / Odometer Reading',
-      logout: 'Logout'
+      logout: 'Logout',
+      notBoardedCount: 'Not Boarded:',
+      studentRoster: 'Student Roster',
+      notBoardedList: 'Not Boarded Students',
+      boardedList: 'Boarded Students',
+      allStudents: 'All Students',
+      shareLiveRoute: 'Share Live Route on WhatsApp',
+      shareSuccess: 'Live tracking link shared on WhatsApp!',
+      markBoarded: 'Mark Boarded',
+      callParent: 'Call Parent'
     },
     reception: {
       loginTitle: 'College Gate Scanner',
@@ -195,7 +204,16 @@ export const translations = {
       journeyReasonLabel: 'ప్రయాణ ఉద్దేశం / కారణం',
       startTripButton: 'ప్రయాణాన్ని ప్రారంభించండి',
       endingFuelLabel: 'ముగింపు ఇంధనం / ఓడోమీటర్ రీడింగ్',
-      logout: 'లాగౌట్'
+      logout: 'లాగౌట్',
+      notBoardedCount: 'ఎక్కని వారు:',
+      studentRoster: 'విద్యార్థుల జాబితా',
+      notBoardedList: 'ఇంకా ఎక్కని విద్యార్థులు',
+      boardedList: 'ఎక్కిన విద్యార్థులు',
+      allStudents: 'మొత్తం విద్యార్థులు',
+      shareLiveRoute: 'వాట్సాప్‌లో లైవ్ రూట్ లింక్ షేర్ చేయండి',
+      shareSuccess: 'వాట్సాప్ షేరింగ్ లింక్ సిద్ధం!',
+      markBoarded: 'బోర్డింగ్ నమోదు',
+      callParent: 'తల్లిదండ్రులకు కాల్'
     },
     reception: {
       loginTitle: 'కళాశాల గేట్ స్కానర్',

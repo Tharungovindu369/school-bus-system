@@ -63,7 +63,10 @@ export const api = {
   },
   getIncidents: (auth) => request('/incidents', { headers: getAuthHeader(auth) }),
   getBuses: (auth) => request('/buses', { headers: getAuthHeader(auth) }),
-  getStudentsByBus: (bus, auth) => request(`/buses/${bus}/students`, { headers: getAuthHeader(auth) }),
+  getStudentsByBus: (bus, auth) => {
+    const authHeaders = auth ? getAuthHeader(auth) : getDriverHeader(bus);
+    return request(`/bus/${encodeURIComponent(bus)}/students`, { headers: authHeaders });
+  },
   getBus: (number) => request(`/bus/${number}`),
   getTodayTimeline: (studentId) => request(`/students/${studentId}/today-timeline`),
   

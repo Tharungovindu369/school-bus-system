@@ -65,12 +65,39 @@ export default function ParentTrack() {
     ? new Date(bus.last_updated).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
     : 'Not available';
 
+  const handleShare = async () => {
+    const url = window.location.href;
+    const cleanBus = formatBusNumber(bus.bus_number);
+    const text = `🚌 *Prathibha Junior College - Live Bus Tracking*\nBus: *${cleanBus}*\nDriver: *${bus.driver_name || 'N/A'}*\n\n📍 *Click to track live location on map:*\n${url}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: `Live Bus Tracking - ${cleanBus}`, text, url });
+        return;
+      } catch (_) {}
+    }
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="bg-primary text-white p-4 shadow">
-        <Link to="/" className="text-blue-200 text-sm">← Home</Link>
-        <h1 className="text-2xl font-bold mt-1">Track {formatBusNumber(bus.bus_number)}</h1>        <p className="text-blue-100 text-sm">Driver: {bus.driver_name || 'N/A'}</p>
-        <p className="text-blue-200 text-xs mt-1">Last updated: {lastUpdated}</p>
+        <div className="flex justify-between items-start">
+          <div>
+            <Link to="/" className="text-blue-200 text-sm">← Home</Link>
+            <h1 className="text-2xl font-bold mt-1">Track {formatBusNumber(bus.bus_number)}</h1>
+            <p className="text-blue-100 text-sm">Driver: {bus.driver_name || 'N/A'}</p>
+            <p className="text-blue-200 text-xs mt-1">Last updated: {lastUpdated}</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleShare}
+            className="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 shadow transition mt-1"
+            title="Share bus tracking link on WhatsApp"
+          >
+            <span>📲</span>
+            <span>Share Map</span>
+          </button>
+        </div>
       </div>
 
       <div className="p-4">
