@@ -1105,12 +1105,21 @@ const exportTodayCSV = () => {
                 <select
                   value={busFilter}
                   onChange={(e) => setBusFilter(e.target.value)}
-                  className="border rounded-lg px-3 py-2 text-sm"
+                  className="border rounded-lg px-3 py-2 text-sm bg-white font-semibold text-slate-700"
                 >
                   <option value="">All Buses</option>
-                  {Array.from(new Set(attendance.map((a) => a.bus_number))).map((b) => (
-                    <option key={b} value={b}>Bus {b}</option>
-                  ))}
+                  {Array.from(
+                    new Set([
+                      ...buses.map((b) => b.bus_number),
+                      ...attendance.map((a) => a.bus_number),
+                      ...Array.from({ length: 16 }, (_, i) => `${i + 1}`)
+                    ])
+                  )
+                    .filter(Boolean)
+                    .sort((a, b) => (parseInt(busNumberKey(a), 10) || 0) - (parseInt(busNumberKey(b), 10) || 0))
+                    .map((b) => (
+                      <option key={b} value={b}>{formatBusNumber(b)}</option>
+                    ))}
                 </select>
                 <button
                   onClick={exportTodayCSV}
