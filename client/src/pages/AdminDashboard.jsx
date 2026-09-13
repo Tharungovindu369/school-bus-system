@@ -579,7 +579,13 @@ function StatCard({ label, value, color = 'blue' }) {
 }
 
 function AdminLogin({ onLogin }) {
-  const [role, setRole] = useState('admin');
+  const [role, setRole] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search).get('role');
+      if (['admin', 'accountant', 'bus_incharge'].includes(p)) return p;
+    } catch (_) {}
+    return 'admin';
+  });
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
 
