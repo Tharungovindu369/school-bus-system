@@ -147,6 +147,11 @@ function StopMapPicker({ lat, lng, onChange }) {
     const map = L.map(mapRef.current, {
       zoomControl: true,
       attributionControl: false,
+      scrollWheelZoom: true,
+      touchZoom: true,
+      doubleClickZoom: true,
+      boxZoom: true,
+      dragging: true,
     }).setView([initialLat, initialLng], 13);
     mapInstance.current = map;
 

@@ -32,8 +32,20 @@ export default function BusMap({
   const mapInstance = useRef(null);
   const markersLayer = useRef(null);
   const collegeLayer = useRef(null);
+  const hasInitiallyCentered = useRef(false);
+  const userInteracted = useRef(false);
+  const lastHighlightBus = useRef(highlightBus);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
+
+  // Reset interaction state if highlightBus prop changes
+  useEffect(() => {
+    if (lastHighlightBus.current !== highlightBus) {
+      lastHighlightBus.current = highlightBus;
+      userInteracted.current = false;
+      hasInitiallyCentered.current = false;
+    }
+  }, [highlightBus]);
 
   // 1. Initialize Map
   useEffect(() => {
@@ -45,7 +57,17 @@ export default function BusMap({
       const map = L.map(mapRef.current, {
         zoomControl: true,
         attributionControl: false,
+        scrollWheelZoom: true,
+        touchZoom: true,
+        doubleClickZoom: true,
+        boxZoom: true,
+        dragging: true,
       }).setView(mapCenter, zoom);
+
+      // Track user drag and zoom so live polling doesn't override parent's chosen zoom
+      map.on('dragstart zoomstart', () => {
+        userInteracted.current = true;
+      });
 
       // Standard OpenStreetMap tiles (free, clear colors, no API key, no watermark)
       const tileLayer = L.tileLayer(MAP_TILE, {
@@ -188,18 +210,59 @@ export default function BusMap({
         const tLat = parseFloat(target.latitude || target.current_lat || target.lat);
         const tLng = parseFloat(target.longitude || target.current_lng || target.lng);
         if (!isNaN(tLat) && !isNaN(tLng) && tLat !== 0) {
-          map.setView([tLat, tLng], 14);
+          if (!hasInitiallyCentered.current) {
+            // First load: center on bus at comfortable zoom
+            map.setView([tLat, tLng], 15);
+            hasInitiallyCentered.current = true;
+          } else if (!userInteracted.current) {
+            // Live update: smoothly pan to new coordinates WITHOUT overriding parent's zoom!
+            map.panTo([tLat, tLng], { animate: true, duration: 0.8 });
+          }
           return;
         }
       }
     }
 
-    if (latLngs.length > 1) {
-      map.fitBounds(latLngs, { padding: [40, 40], maxZoom: 15 });
-    } else {
-      map.setView(DEFAULT_CENTER, zoom);
+    // Admin fleet view: only fit bounds once on initial load
+    if (!hasInitiallyCentered.current) {
+      if (latLngs.length > 1) {
+        map.fitBounds(latLngs, { padding: [40, 40], maxZoom: 15 });
+      } else {
+        map.setView(DEFAULT_CENTER, zoom);
+      }
+      hasInitiallyCentered.current = true;
     }
   }, [buses, highlightBus, ready, zoom]);
+
+  const handleRecenter = () => {
+    if (!mapInstance.current) return;
+    const map = mapInstance.current;
+    userInteracted.current = false;
+
+    if (highlightBus) {
+      const target = (buses || []).find((b) => busesMatch(b.bus_number, highlightBus));
+      if (target) {
+        const tLat = parseFloat(target.latitude || target.current_lat || target.lat);
+        const tLng = parseFloat(target.longitude || target.current_lng || target.lng);
+        if (!isNaN(tLat) && !isNaN(tLng) && tLat !== 0) {
+          map.flyTo([tLat, tLng], 16, { duration: 0.8 });
+          return;
+        }
+      }
+    }
+
+    const latLngs = [DEFAULT_CENTER];
+    (buses || []).forEach((b) => {
+      const lat = parseFloat(b.latitude || b.current_lat || b.lat);
+      const lng = parseFloat(b.longitude || b.current_lng || b.lng);
+      if (!isNaN(lat) && !isNaN(lng) && lat !== 0) latLngs.push([lat, lng]);
+    });
+    if (latLngs.length > 1) {
+      map.flyToBounds(latLngs, { padding: [40, 40], maxZoom: 15, duration: 0.8 });
+    } else {
+      map.flyTo(DEFAULT_CENTER, zoom, { duration: 0.8 });
+    }
+  };
 
   if (error) {
     return (
@@ -220,6 +283,18 @@ export default function BusMap({
         </div>
       )}
       <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+
+      {ready && (
+        <button
+          type="button"
+          onClick={handleRecenter}
+          className="absolute top-3 right-3 z-[500] bg-white/95 hover:bg-white active:scale-95 text-slate-800 text-xs font-bold px-3 py-1.5 rounded-xl shadow-md border border-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+          title="Recenter Map"
+        >
+          <span>🎯</span>
+          <span>{highlightBus ? 'Follow Bus' : 'Recenter Fleet'}</span>
+        </button>
+      )}
     </div>
   );
 }
