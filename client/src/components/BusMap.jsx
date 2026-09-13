@@ -18,7 +18,7 @@ L.Icon.Default.mergeOptions({
 });
 
 const DEFAULT_CENTER = [16.7375, 78.0017]; // Prathibha Jr College, Mahabubnagar, Telangana
-const CARTO_TILE = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
+const MAP_TILE = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 export default function BusMap({
   buses = [],
@@ -47,11 +47,10 @@ export default function BusMap({
         attributionControl: false,
       }).setView(mapCenter, zoom);
 
-      // Fast, reliable CartoDB Voyager raster tiles
-      const tileLayer = L.tileLayer(CARTO_TILE, {
+      // Standard OpenStreetMap tiles (free, clear colors, no API key, no watermark)
+      const tileLayer = L.tileLayer(MAP_TILE, {
         maxZoom: 19,
-        subdomains: 'abcd',
-        attribution: '&copy; CartoDB',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       });
       tileLayer.addTo(map);
 

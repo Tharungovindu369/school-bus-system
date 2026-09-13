@@ -150,11 +150,10 @@ function StopMapPicker({ lat, lng, onChange }) {
     }).setView([initialLat, initialLng], 13);
     mapInstance.current = map;
 
-    // Fast, reliable CartoDB Voyager raster tiles
-    const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
+    // Standard OpenStreetMap tiles (free, clear colors, no API key, no watermark)
+    const tileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      subdomains: 'abcd',
-      attribution: '&copy; CartoDB',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     });
     tileLayer.addTo(map);
 
